@@ -6,6 +6,7 @@ use iced::widget::{
     Rule, button, checkbox, column, container, horizontal_space, row, scrollable, text, text_input,
 };
 use iced::{Background, Color, Element, Length, Padding, Task, Theme};
+use std::collections::HashSet; // <--- Import
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
@@ -31,6 +32,9 @@ struct RustacheGui {
     search_value: String,
     editing_uid: Option<String>,
 
+    // Track which tasks have details expanded
+    expanded_tasks: HashSet<String>,
+
     client: Option<RustyClient>,
     loading: bool,
     error_msg: Option<String>,
@@ -45,6 +49,7 @@ impl Default for RustacheGui {
             input_value: String::new(),
             search_value: String::new(),
             editing_uid: None,
+            expanded_tasks: HashSet::new(), // Init
             client: None,
             loading: true,
             error_msg: None,
@@ -57,15 +62,15 @@ enum Message {
     InputChanged(String),
     SearchChanged(String),
     SubmitTask,
-
     ToggleTask(usize, bool),
     SelectCalendar(String),
-
     DeleteTask(usize),
     EditTaskStart(usize),
     ChangePriority(usize, i8),
     IndentTask(usize),
     OutdentTask(usize),
+
+    ToggleDetails(String), // <--- NEW
 
     Loaded(
         Result<
@@ -80,8 +85,6 @@ enum Message {
     ),
     SyncSaved(Result<TodoTask, String>),
     TasksRefreshed(Result<Vec<TodoTask>, String>),
-
-    // Fix Warning: Allow unused result field since we just use this as a signal
     DeleteComplete(#[allow(dead_code)] Result<(), String>),
 }
 
@@ -95,158 +98,17 @@ impl RustacheGui {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            // --- ACTIONS ---
-            Message::DeleteTask(index) => {
-                if let Some(task) = self.tasks.get(index).cloned() {
-                    self.tasks.remove(index);
-                    let raw = self.tasks.clone();
-                    self.tasks = TodoTask::organize_hierarchy(raw);
-
-                    if let Some(client) = &self.client {
-                        return Task::perform(
-                            async_delete_wrapper(client.clone(), task),
-                            Message::DeleteComplete,
-                        );
-                    }
+            // --- NEW: TOGGLE DETAILS ---
+            Message::ToggleDetails(uid) => {
+                if self.expanded_tasks.contains(&uid) {
+                    self.expanded_tasks.remove(&uid);
+                } else {
+                    self.expanded_tasks.insert(uid);
                 }
                 Task::none()
             }
 
-            Message::ChangePriority(index, delta) => {
-                if let Some(task) = self.tasks.get_mut(index) {
-                    let new_prio = if delta > 0 {
-                        match task.priority {
-                            0 => 9,
-                            9 => 5,
-                            5 => 1,
-                            1 => 1,
-                            _ => 5,
-                        }
-                    } else {
-                        match task.priority {
-                            1 => 5,
-                            5 => 9,
-                            9 => 0,
-                            0 => 0,
-                            _ => 0,
-                        }
-                    };
-
-                    if new_prio != task.priority {
-                        task.priority = new_prio;
-                        if let Some(client) = &self.client {
-                            return Task::perform(
-                                async_update_wrapper(client.clone(), task.clone()),
-                                Message::SyncSaved,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            Message::IndentTask(index) => {
-                if index > 0 && index < self.tasks.len() {
-                    let parent_uid = self.tasks[index - 1].uid.clone();
-                    if self.tasks[index].parent_uid != Some(parent_uid.clone()) {
-                        if let Some(task) = self.tasks.get_mut(index) {
-                            task.parent_uid = Some(parent_uid);
-                            // Fix Warning: removed 'mut'
-                            let task_copy = task.clone();
-
-                            let raw = self.tasks.clone();
-                            self.tasks = TodoTask::organize_hierarchy(raw);
-
-                            if let Some(client) = &self.client {
-                                return Task::perform(
-                                    async_update_wrapper(client.clone(), task_copy),
-                                    Message::SyncSaved,
-                                );
-                            }
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            Message::OutdentTask(index) => {
-                if let Some(task) = self.tasks.get_mut(index) {
-                    if task.parent_uid.is_some() {
-                        task.parent_uid = None;
-                        // Fix Warning: removed 'mut'
-                        let task_copy = task.clone();
-
-                        let raw = self.tasks.clone();
-                        self.tasks = TodoTask::organize_hierarchy(raw);
-
-                        if let Some(client) = &self.client {
-                            return Task::perform(
-                                async_update_wrapper(client.clone(), task_copy),
-                                Message::SyncSaved,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            Message::EditTaskStart(index) => {
-                if let Some(task) = self.tasks.get(index) {
-                    self.input_value = task.to_smart_string();
-                    self.editing_uid = Some(task.uid.clone());
-                }
-                Task::none()
-            }
-
-            // --- FORM SUBMIT ---
-            Message::SubmitTask => {
-                if !self.input_value.is_empty() {
-                    if let Some(edit_uid) = &self.editing_uid {
-                        // UPDATE EXISTING
-                        if let Some(index) = self.tasks.iter().position(|t| t.uid == *edit_uid) {
-                            if let Some(task) = self.tasks.get_mut(index) {
-                                task.apply_smart_input(&self.input_value);
-                                let task_copy = task.clone();
-                                self.input_value.clear();
-                                self.editing_uid = None;
-
-                                if let Some(client) = &self.client {
-                                    return Task::perform(
-                                        async_update_wrapper(client.clone(), task_copy),
-                                        Message::SyncSaved,
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        // CREATE NEW
-                        let new_task = TodoTask::new(&self.input_value);
-                        self.tasks.push(new_task.clone());
-                        let raw = self.tasks.clone();
-                        self.tasks = TodoTask::organize_hierarchy(raw);
-                        self.input_value.clear();
-
-                        if let Some(client) = &self.client {
-                            return Task::perform(
-                                async_create_wrapper(client.clone(), new_task),
-                                Message::SyncSaved,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            // --- ASYNC & BOILERPLATE ---
-            Message::SearchChanged(val) => {
-                self.search_value = val;
-                Task::none()
-            }
-            Message::InputChanged(value) => {
-                self.input_value = value;
-                Task::none()
-            }
-
+            // ... existing logic (Loaded, SyncSaved, TasksRefreshed) ...
             Message::Loaded(Ok((client, cals, tasks, active))) => {
                 self.client = Some(client);
                 self.calendars = cals;
@@ -260,6 +122,7 @@ impl RustacheGui {
                 self.loading = false;
                 Task::none()
             }
+
             Message::SyncSaved(Ok(updated_task)) => {
                 if let Some(index) = self.tasks.iter().position(|t| t.uid == updated_task.uid) {
                     self.tasks[index] = updated_task;
@@ -282,6 +145,7 @@ impl RustacheGui {
                 self.loading = false;
                 Task::none()
             }
+
             Message::SelectCalendar(href) => {
                 if let Some(client) = &mut self.client {
                     self.loading = true;
@@ -294,6 +158,58 @@ impl RustacheGui {
                 }
                 Task::none()
             }
+
+            Message::InputChanged(value) => {
+                self.input_value = value;
+                Task::none()
+            }
+            Message::SearchChanged(val) => {
+                self.search_value = val;
+                Task::none()
+            }
+
+            Message::EditTaskStart(index) => {
+                if let Some(task) = self.tasks.get(index) {
+                    self.input_value = task.to_smart_string();
+                    self.editing_uid = Some(task.uid.clone());
+                }
+                Task::none()
+            }
+
+            Message::SubmitTask => {
+                if !self.input_value.is_empty() {
+                    if let Some(edit_uid) = &self.editing_uid {
+                        if let Some(index) = self.tasks.iter().position(|t| t.uid == *edit_uid) {
+                            if let Some(task) = self.tasks.get_mut(index) {
+                                task.apply_smart_input(&self.input_value);
+                                let task_copy = task.clone();
+                                self.input_value.clear();
+                                self.editing_uid = None;
+                                if let Some(client) = &self.client {
+                                    return Task::perform(
+                                        async_update_wrapper(client.clone(), task_copy),
+                                        Message::SyncSaved,
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        let new_task = TodoTask::new(&self.input_value);
+                        self.tasks.push(new_task.clone());
+                        let raw = self.tasks.clone();
+                        self.tasks = TodoTask::organize_hierarchy(raw);
+                        self.input_value.clear();
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_create_wrapper(client.clone(), new_task),
+                                Message::SyncSaved,
+                            );
+                        }
+                    }
+                }
+                Task::none()
+            }
+
             Message::ToggleTask(index, is_checked) => {
                 if let Some(task) = self.tasks.get_mut(index) {
                     task.completed = is_checked;
@@ -306,12 +222,94 @@ impl RustacheGui {
                 }
                 Task::none()
             }
+            Message::DeleteTask(index) => {
+                if let Some(task) = self.tasks.get(index).cloned() {
+                    self.tasks.remove(index);
+                    let raw = self.tasks.clone();
+                    self.tasks = TodoTask::organize_hierarchy(raw);
+                    if let Some(client) = &self.client {
+                        return Task::perform(
+                            async_delete_wrapper(client.clone(), task),
+                            Message::DeleteComplete,
+                        );
+                    }
+                }
+                Task::none()
+            }
             Message::DeleteComplete(_) => Task::none(),
+
+            Message::ChangePriority(index, delta) => {
+                if let Some(task) = self.tasks.get_mut(index) {
+                    let new_prio = if delta > 0 {
+                        match task.priority {
+                            0 => 9,
+                            9 => 5,
+                            5 => 1,
+                            1 => 1,
+                            _ => 5,
+                        }
+                    } else {
+                        match task.priority {
+                            1 => 5,
+                            5 => 9,
+                            9 => 0,
+                            0 => 0,
+                            _ => 0,
+                        }
+                    };
+                    if new_prio != task.priority {
+                        task.priority = new_prio;
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), task.clone()),
+                                Message::SyncSaved,
+                            );
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::IndentTask(index) => {
+                if index > 0 && index < self.tasks.len() {
+                    let parent_uid = self.tasks[index - 1].uid.clone();
+                    if self.tasks[index].parent_uid != Some(parent_uid.clone()) {
+                        if let Some(task) = self.tasks.get_mut(index) {
+                            task.parent_uid = Some(parent_uid);
+                            let task_copy = task.clone();
+                            let raw = self.tasks.clone();
+                            self.tasks = TodoTask::organize_hierarchy(raw);
+                            if let Some(client) = &self.client {
+                                return Task::perform(
+                                    async_update_wrapper(client.clone(), task_copy),
+                                    Message::SyncSaved,
+                                );
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::OutdentTask(index) => {
+                if let Some(task) = self.tasks.get_mut(index) {
+                    if task.parent_uid.is_some() {
+                        task.parent_uid = None;
+                        let task_copy = task.clone();
+                        let raw = self.tasks.clone();
+                        self.tasks = TodoTask::organize_hierarchy(raw);
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), task_copy),
+                                Message::SyncSaved,
+                            );
+                        }
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
-        // Sidebar
         let sidebar_content = column(
             self.calendars
                 .iter()
@@ -347,12 +345,10 @@ impl RustacheGui {
         } else {
             "Rustache"
         };
-
         let search_input = text_input("Search...", &self.search_value)
             .on_input(Message::SearchChanged)
             .padding(5)
             .size(16);
-
         let input_placeholder = if self.editing_uid.is_some() {
             "Editing task..."
         } else {
@@ -389,15 +385,12 @@ impl RustacheGui {
                         5 => Color::from_rgb(0.8, 0.8, 0.2),
                         _ => Color::WHITE,
                     };
-
                     let indent_size = if is_searching { 0 } else { task.depth * 20 };
                     let indent = horizontal_space().width(Length::Fixed(indent_size as f32));
-
                     let summary = text(&task.summary)
                         .size(20)
                         .color(color)
                         .width(Length::Fill);
-
                     let date_content: Element<_> = match task.due {
                         Some(d) => text(d.format("%Y-%m-%d").to_string())
                             .size(14)
@@ -406,10 +399,25 @@ impl RustacheGui {
                         None => horizontal_space().width(0).into(),
                     };
 
-                    // --- FIX: Safe ASCII Buttons ---
                     let btn_style = button::secondary;
+                    // Info Button logic
+                    let has_desc = !task.description.is_empty();
+                    let is_expanded = self.expanded_tasks.contains(&task.uid);
+                    let info_btn = if has_desc {
+                        button(text("ℹ").size(12))
+                            .style(if is_expanded {
+                                button::primary
+                            } else {
+                                button::secondary
+                            })
+                            .padding(5)
+                            .on_press(Message::ToggleDetails(task.uid.clone()))
+                    } else {
+                        button(text(" ").size(12)).style(button::text) // Invisible placeholder
+                    };
+
                     let actions = row![
-                        // Priority
+                        info_btn,
                         button(text("+").size(14))
                             .style(btn_style)
                             .padding(5)
@@ -418,7 +426,6 @@ impl RustacheGui {
                             .style(btn_style)
                             .padding(5)
                             .on_press(Message::ChangePriority(real_index, -1)),
-                        // Indent
                         button(text(">").size(14))
                             .style(btn_style)
                             .padding(5)
@@ -427,7 +434,6 @@ impl RustacheGui {
                             .style(btn_style)
                             .padding(5)
                             .on_press(Message::OutdentTask(real_index)),
-                        // CRUD
                         button(text("Edit").size(14))
                             .style(btn_style)
                             .padding(5)
@@ -439,7 +445,7 @@ impl RustacheGui {
                     ]
                     .spacing(5);
 
-                    let row_content = row![
+                    let row_main = row![
                         indent,
                         checkbox("", task.completed)
                             .on_toggle(move |b| Message::ToggleTask(real_index, b)),
@@ -447,14 +453,28 @@ impl RustacheGui {
                         date_content,
                         actions
                     ]
-                    .spacing(15) // More spacing between elements
+                    .spacing(15)
                     .align_y(iced::Alignment::Center);
 
-                    container(row_content)
-                        // --- FIX: Increased Right Padding ---
+                    // Render Description if expanded
+                    let content: Element<_> = if is_expanded {
+                        let desc_text = text(&task.description)
+                            .size(14)
+                            .color(Color::from_rgb(0.7, 0.7, 0.7));
+                        // Add extra indent for description
+                        let desc_row = row![
+                            horizontal_space().width(Length::Fixed(indent_size as f32 + 30.0)),
+                            desc_text
+                        ];
+                        column![row_main, desc_row].spacing(5).into()
+                    } else {
+                        row_main.into()
+                    };
+
+                    container(content)
                         .padding(Padding {
                             top: 5.0,
-                            right: 30.0, // Clears the scrollbar
+                            right: 30.0,
                             bottom: 5.0,
                             left: 5.0,
                         })
@@ -486,7 +506,6 @@ impl RustacheGui {
                 .width(Length::Fill)
                 .center_x(Length::Fill)
         ];
-
         container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -498,7 +517,7 @@ impl RustacheGui {
     }
 }
 
-// --- ASYNC WRAPPERS ---
+// --- ASYNC WRAPPERS & LOGIC (Same as before) ---
 async fn connect_and_fetch_wrapper() -> Result<
     (
         RustyClient,
@@ -541,7 +560,6 @@ async fn async_delete_wrapper(client: RustyClient, task: TodoTask) -> Result<(),
         .map_err(|e| e.to_string())?
 }
 
-// --- LOGIC ---
 async fn connect_and_fetch() -> Result<
     (
         RustyClient,
@@ -556,7 +574,6 @@ async fn connect_and_fetch() -> Result<
         .map_err(|e| e.to_string())?;
     let calendars = client.get_calendars().await.unwrap_or_default();
     let mut active_href = None;
-
     if let Some(def_cal) = config.default_calendar {
         if let Some(found) = calendars
             .iter()
@@ -574,7 +591,6 @@ async fn connect_and_fetch() -> Result<
             active_href = Some(href);
         }
     }
-
     let tasks = client.get_tasks().await.map_err(|e| e.to_string())?;
     Ok((client, calendars, tasks, active_href))
 }

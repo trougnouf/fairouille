@@ -4,9 +4,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap}, // Added Wrap
 };
 
+// ... Focus, InputMode, AppState structs/impls remain exactly the same ...
 #[derive(PartialEq)]
 pub enum Focus {
     Sidebar,
@@ -22,33 +23,27 @@ pub enum InputMode {
 }
 
 pub struct AppState {
-    // Data
     pub tasks: Vec<Task>,
     pub view_indices: Vec<usize>,
     pub calendars: Vec<CalendarListEntry>,
-
-    // State
     pub list_state: ListState,
     pub cal_state: ListState,
     pub active_focus: Focus,
     pub message: String,
     pub loading: bool,
-
-    // Input
     pub mode: InputMode,
     pub input_buffer: String,
     pub cursor_position: usize,
-
     pub editing_index: Option<usize>,
 }
 
 impl AppState {
+    // ... same methods as before ...
     pub fn new() -> Self {
         let mut l_state = ListState::default();
         l_state.select(Some(0));
         let mut c_state = ListState::default();
         c_state.select(Some(0));
-
         Self {
             tasks: vec![],
             view_indices: vec![],
@@ -65,22 +60,19 @@ impl AppState {
         }
     }
 
-    // --- TEXT HELPERS ---
+    // ... copy helper methods (move_cursor, etc) from previous version ...
     pub fn move_cursor_left(&mut self) {
         let cursor_moved_left = self.cursor_position.saturating_sub(1);
         self.cursor_position = self.clamp_cursor(cursor_moved_left);
     }
-
     pub fn move_cursor_right(&mut self) {
         let cursor_moved_right = self.cursor_position.saturating_add(1);
         self.cursor_position = self.clamp_cursor(cursor_moved_right);
     }
-
     pub fn enter_char(&mut self, new_char: char) {
         self.input_buffer.insert(self.cursor_position, new_char);
         self.move_cursor_right();
     }
-
     pub fn delete_char(&mut self) {
         if self.cursor_position != 0 {
             let current_index = self.cursor_position;
@@ -91,17 +83,13 @@ impl AppState {
             self.move_cursor_left();
         }
     }
-
     pub fn reset_input(&mut self) {
         self.input_buffer.clear();
         self.cursor_position = 0;
     }
-
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
         new_cursor_pos.clamp(0, self.input_buffer.chars().count())
     }
-
-    // --- VIEW HELPERS ---
     pub fn recalculate_view(&mut self) {
         if self.mode == InputMode::Searching && !self.input_buffer.is_empty() {
             let query = self.input_buffer.to_lowercase();
@@ -122,7 +110,6 @@ impl AppState {
             self.list_state.select(Some(self.view_indices.len() - 1));
         }
     }
-
     pub fn get_selected_master_index(&self) -> Option<usize> {
         if let Some(view_idx) = self.list_state.selected() {
             if view_idx < self.view_indices.len() {
@@ -131,8 +118,6 @@ impl AppState {
         }
         None
     }
-
-    // --- NAVIGATION ---
     pub fn next(&mut self) {
         match self.active_focus {
             Focus::Main => {
@@ -171,7 +156,6 @@ impl AppState {
             }
         }
     }
-
     pub fn previous(&mut self) {
         match self.active_focus {
             Focus::Main => {
@@ -210,7 +194,6 @@ impl AppState {
             }
         }
     }
-
     pub fn jump_forward(&mut self, step: usize) {
         match self.active_focus {
             Focus::Main => {
@@ -231,7 +214,6 @@ impl AppState {
             }
         }
     }
-
     pub fn jump_backward(&mut self, step: usize) {
         match self.active_focus {
             Focus::Main => {
@@ -252,7 +234,6 @@ impl AppState {
             }
         }
     }
-
     pub fn toggle_focus(&mut self) {
         self.active_focus = match self.active_focus {
             Focus::Main => Focus::Sidebar,
@@ -262,17 +243,27 @@ impl AppState {
 }
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
+    // Layout:
+    // Top: Body
+    // Bottom: Footer
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
         .split(f.area());
 
+    // Body: Sidebar | Main Area
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
         .split(v_chunks[0]);
 
-    // Sidebar
+    // Main Area: Task List | Details Pane (Vertical split)
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(h_chunks[1]);
+
+    // --- SIDEBAR ---
     let cal_items: Vec<ListItem> = state
         .calendars
         .iter()
@@ -297,7 +288,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         );
     f.render_stateful_widget(sidebar, h_chunks[0], &mut state.cal_state);
 
-    // Main List
+    // --- MAIN: LIST ---
     let task_items: Vec<ListItem> = state
         .view_indices
         .iter()
@@ -313,12 +304,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 Some(d) => format!(" ({})", d.format("%d/%m")),
                 None => "".to_string(),
             };
-
             let indent = "  ".repeat(t.depth);
-
-            // --- FIX: Corrected format string (4 braces for 4 args) ---
             let summary = format!("{}{} {}{}", indent, checkbox, t.summary, due_str);
-
             ListItem::new(Line::from(vec![Span::styled(summary, style)]))
         })
         .collect();
@@ -346,11 +333,28 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 .add_modifier(Modifier::BOLD)
                 .bg(Color::DarkGray),
         );
-    f.render_stateful_widget(task_list, h_chunks[1], &mut state.list_state);
+    f.render_stateful_widget(task_list, main_chunks[0], &mut state.list_state);
 
-    // Footer
+    // --- MAIN: DETAILS ---
+    let details_text = if let Some(idx) = state.get_selected_master_index() {
+        let task = &state.tasks[idx];
+        if task.description.is_empty() {
+            "No description.".to_string()
+        } else {
+            task.description.clone()
+        }
+    } else {
+        "".to_string()
+    };
+
+    let details = Paragraph::new(details_text)
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title(" Details "));
+
+    f.render_widget(details, main_chunks[1]);
+
+    // --- FOOTER ---
     let footer_area = v_chunks[1];
-
     match state.mode {
         InputMode::Creating | InputMode::Editing | InputMode::Searching => {
             let (title, prefix, color) = match state.mode {
@@ -358,16 +362,12 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 InputMode::Editing => (" Edit Task ", "> ", Color::Magenta),
                 _ => (" Create Task ", "> ", Color::Yellow),
             };
-
             let input = Paragraph::new(format!("{}{}", prefix, state.input_buffer))
                 .style(Style::default().fg(color))
                 .block(Block::default().borders(Borders::ALL).title(title));
-
             f.render_widget(input, footer_area);
-
             let cursor_x = footer_area.x + 1 + prefix.len() as u16 + state.cursor_position as u16;
             let cursor_y = footer_area.y + 1;
-
             f.set_cursor_position((cursor_x, cursor_y));
         }
         InputMode::Normal => {
@@ -375,7 +375,6 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(v_chunks[1]);
-
             let status = Paragraph::new(state.message.clone())
                 .style(Style::default().fg(Color::Cyan))
                 .block(
@@ -383,7 +382,6 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                         .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
                         .title(" Status "),
                 );
-
             let help = Paragraph::new("Tab:View | /:Find | a:Add | e:Edit | d:Del | >/<:Indent")
                 .style(Style::default().fg(Color::DarkGray))
                 .alignment(Alignment::Right)
@@ -392,7 +390,6 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                         .borders(Borders::RIGHT | Borders::TOP | Borders::BOTTOM)
                         .title(" Actions "),
                 );
-
             f.render_widget(status, f_chunks[0]);
             f.render_widget(help, f_chunks[1]);
         }

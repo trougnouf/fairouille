@@ -8,18 +8,18 @@ use uuid::Uuid;
 pub struct Task {
     pub uid: String,
     pub summary: String,
+    pub description: String, // <--- NEW FIELD
     pub completed: bool,
     pub due: Option<DateTime<Utc>>,
     pub priority: u8,
     pub parent_uid: Option<String>,
     pub etag: String,
     pub href: String,
-    // NEW: Visual Depth (0 = Root, 1 = Child, etc.)
-    // This is calculated locally, not saved to ICS
     pub depth: usize,
 }
 
 impl Task {
+    // ... apply_smart_input (unchanged) ...
     pub fn apply_smart_input(&mut self, input: &str) {
         let mut summary_words = Vec::new();
         self.priority = 0;
@@ -56,6 +56,7 @@ impl Task {
         self.summary = summary_words.join(" ");
     }
 
+    // ... to_smart_string (unchanged) ...
     pub fn to_smart_string(&self) -> String {
         let mut s = self.summary.clone();
         if self.priority > 0 {
@@ -71,6 +72,7 @@ impl Task {
         let mut task = Self {
             uid: Uuid::new_v4().to_string(),
             summary: String::new(),
+            description: String::new(), // <--- Init Empty
             completed: false,
             due: None,
             priority: 0,
@@ -83,45 +85,35 @@ impl Task {
         task
     }
 
+    // ... organize_hierarchy (unchanged) ...
     pub fn organize_hierarchy(mut tasks: Vec<Task>) -> Vec<Task> {
-        // 1. Index all UIDs so we know who exists
         let present_uids: HashSet<String> = tasks.iter().map(|t| t.uid.clone()).collect();
-
         let mut children_map: HashMap<String, Vec<Task>> = HashMap::new();
         let mut roots: Vec<Task> = Vec::new();
 
-        // Sort first by Priority/Date
         tasks.sort();
 
         for mut task in tasks {
-            // Check if the parent actually exists in this list
             let is_orphan = match &task.parent_uid {
-                Some(p_uid) => !present_uids.contains(p_uid), // Parent missing? -> It's a Root now
-                None => true,                                 // No parent? -> It's a Root
+                Some(p_uid) => !present_uids.contains(p_uid),
+                None => true,
             };
 
             if is_orphan {
-                // If it was technically a child but parent is gone, clear the parent_uid
-                // so it behaves like a root permanently (optional, but cleaner for display)
                 if task.parent_uid.is_some() {
-                    // We don't clear it in the struct to avoid modifying data implicity,
-                    // but we treat it as a root for display.
                     task.depth = 0;
                 }
                 roots.push(task);
             } else {
-                // Valid child with existing parent
                 let p_uid = task.parent_uid.as_ref().unwrap().clone();
                 children_map.entry(p_uid).or_default().push(task);
             }
         }
 
-        // 2. Recursive Flattening
         let mut result = Vec::new();
         for root in roots {
             Self::append_task_and_children(&root, &mut result, &children_map, 0);
         }
-
         result
     }
 
@@ -134,7 +126,6 @@ impl Task {
         let mut t = task.clone();
         t.depth = depth;
         result.push(t);
-
         if let Some(children) = map.get(&task.uid) {
             for child in children {
                 Self::append_task_and_children(child, result, map, depth + 1);
@@ -142,11 +133,15 @@ impl Task {
         }
     }
 
-    // --- ICAL LOGIC ---
     pub fn to_ics(&self) -> String {
         let mut todo = Todo::new();
         todo.uid(&self.uid);
         todo.summary(&self.summary);
+        // --- SAVE DESCRIPTION ---
+        if !self.description.is_empty() {
+            todo.description(&self.description);
+        }
+
         todo.timestamp(Utc::now());
 
         if self.completed {
@@ -164,9 +159,7 @@ impl Task {
             todo.priority(self.priority.into());
         }
 
-        // SAVE PARENT
         if let Some(p_uid) = &self.parent_uid {
-            // RFC 5545: RELATED-TO;RELTYPE=PARENT:uuid
             todo.add_property("RELATED-TO", p_uid.as_str());
         }
 
@@ -190,6 +183,9 @@ impl Task {
             .ok_or("No VTODO found in ICS")?;
 
         let summary = todo.get_summary().unwrap_or("No Title").to_string();
+        // --- LOAD DESCRIPTION ---
+        let description = todo.get_description().unwrap_or("").to_string();
+
         let uid = todo.get_uid().unwrap_or_default().to_string();
 
         let completed = todo
@@ -221,7 +217,6 @@ impl Task {
             }
         });
 
-        // LOAD PARENT (Simple string extraction)
         let parent_uid = todo
             .properties()
             .get("RELATED-TO")
@@ -230,18 +225,19 @@ impl Task {
         Ok(Task {
             uid,
             summary,
+            description,
             completed,
             due,
             priority,
-            parent_uid, // Saved
+            parent_uid,
             etag,
             href,
-            depth: 0, // Calculated later
+            depth: 0,
         })
     }
 }
 
-// --- SORTING (Unchanged) ---
+// ... Ord/PartialOrd (unchanged) ...
 impl Ord for Task {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.completed != other.completed {
