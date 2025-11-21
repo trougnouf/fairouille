@@ -1,25 +1,20 @@
 use rustache::client::RustyClient;
 use rustache::config::Config;
-use rustache::model::Task as TodoTask;
+use rustache::model::{CalendarListEntry, Task as TodoTask};
 
-use iced::widget::{checkbox, column, container, row, scrollable, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::widget::{Rule, button, checkbox, column, container, row, scrollable, text, text_input};
+use iced::{Background, Color, Element, Length, Task, Theme};
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-// --- GLOBAL RUNTIME ---
-// We need this because Iced's background threads don't have the
-// Tokio Reactor context required by libdav/hyper.
 static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 pub fn main() -> iced::Result {
-    // 1. Initialize the Global Runtime
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     TOKIO_RUNTIME
         .set(runtime)
         .expect("Failed to set global runtime");
 
-    // 2. Run App
     iced::application("Rustache", RustacheGui::update, RustacheGui::view)
         .theme(RustacheGui::theme)
         .run_with(RustacheGui::new)
@@ -27,6 +22,9 @@ pub fn main() -> iced::Result {
 
 struct RustacheGui {
     tasks: Vec<TodoTask>,
+    calendars: Vec<CalendarListEntry>, // <--- Store Calendars
+    active_cal_href: Option<String>,   // <--- Track Active
+
     input_value: String,
     client: Option<RustyClient>,
     loading: bool,
@@ -37,6 +35,8 @@ impl Default for RustacheGui {
     fn default() -> Self {
         Self {
             tasks: vec![],
+            calendars: vec![],
+            active_cal_href: None,
             input_value: String::new(),
             client: None,
             loading: true,
@@ -50,8 +50,23 @@ enum Message {
     InputChanged(String),
     CreateTask,
     ToggleTask(usize, bool),
-    Loaded(Result<(RustyClient, Vec<TodoTask>), String>),
+    SelectCalendar(String), // <--- New Action
+
+    // Async Events
+    // Returns: Client, Calendars, Tasks, Active Href
+    Loaded(
+        Result<
+            (
+                RustyClient,
+                Vec<CalendarListEntry>,
+                Vec<TodoTask>,
+                Option<String>,
+            ),
+            String,
+        >,
+    ),
     SyncSaved(Result<TodoTask, String>),
+    TasksRefreshed(Result<Vec<TodoTask>, String>),
 }
 
 impl RustacheGui {
@@ -64,9 +79,12 @@ impl RustacheGui {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Loaded(Ok((client, tasks))) => {
+            // --- ASYNC HANDLERS ---
+            Message::Loaded(Ok((client, cals, tasks, active))) => {
                 self.client = Some(client);
+                self.calendars = cals;
                 self.tasks = tasks;
+                self.active_cal_href = active;
                 self.loading = false;
             }
             Message::Loaded(Err(e)) => {
@@ -75,13 +93,39 @@ impl RustacheGui {
             }
 
             Message::SyncSaved(Ok(updated_task)) => {
-                // Update local state with server version (ETag)
                 if let Some(index) = self.tasks.iter().position(|t| t.uid == updated_task.uid) {
                     self.tasks[index] = updated_task;
                 }
             }
             Message::SyncSaved(Err(e)) => {
                 self.error_msg = Some(format!("Sync Error: {}", e));
+            }
+
+            Message::TasksRefreshed(Ok(tasks)) => {
+                self.tasks = tasks;
+                self.loading = false;
+            }
+            Message::TasksRefreshed(Err(e)) => {
+                self.error_msg = Some(format!("Fetch Error: {}", e));
+                self.loading = false;
+            }
+
+            // --- UI HANDLERS ---
+
+            // NEW: Switch Calendar
+            Message::SelectCalendar(href) => {
+                if let Some(client) = &mut self.client {
+                    self.loading = true;
+                    self.active_cal_href = Some(href.clone());
+
+                    // Update client state immediately so creates go to right place
+                    client.set_calendar(&href);
+
+                    return Task::perform(
+                        async_fetch_wrapper(client.clone()),
+                        Message::TasksRefreshed,
+                    );
+                }
             }
 
             Message::InputChanged(value) => {
@@ -95,7 +139,6 @@ impl RustacheGui {
                     self.input_value.clear();
 
                     if let Some(client) = &self.client {
-                        // Run on Global Runtime
                         return Task::perform(
                             async_create_wrapper(client.clone(), new_task),
                             Message::SyncSaved,
@@ -109,7 +152,6 @@ impl RustacheGui {
                     task.completed = is_checked;
 
                     if let Some(client) = &self.client {
-                        // Run on Global Runtime
                         return Task::perform(
                             async_update_wrapper(client.clone(), task.clone()),
                             Message::SyncSaved,
@@ -122,10 +164,44 @@ impl RustacheGui {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // 1. SIDEBAR
+        let sidebar_content = column(
+            self.calendars
+                .iter()
+                .map(|cal| {
+                    let is_active = self.active_cal_href.as_ref() == Some(&cal.href);
+
+                    // Style the button based on activity
+                    let btn = button(text(&cal.name).size(16))
+                        .padding(10)
+                        .width(Length::Fill)
+                        .on_press(Message::SelectCalendar(cal.href.clone()));
+
+                    // Simple style tweak for active
+                    if is_active {
+                        btn.style(button::primary)
+                    } else {
+                        btn.style(button::secondary)
+                    }
+                    .into()
+                })
+                .collect::<Vec<_>>(),
+        )
+        .spacing(10)
+        .padding(10);
+
+        let sidebar = container(scrollable(sidebar_content))
+            .width(200) // Fixed width sidebar
+            .height(Length::Fill)
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style::default()
+                    .background(Background::Color(palette.background.weak.color))
+            });
+
+        // 2. MAIN CONTENT
         let title_text = if self.loading {
-            "Rustache (Loading...)"
-        } else if let Some(err) = &self.error_msg {
-            err
+            "Loading..."
         } else {
             "Rustache"
         };
@@ -142,9 +218,9 @@ impl RustacheGui {
                 .enumerate()
                 .map(|(i, task)| {
                     let color = match task.priority {
-                        1..=4 => iced::Color::from_rgb(0.8, 0.2, 0.2),
-                        5 => iced::Color::from_rgb(0.8, 0.8, 0.2),
-                        _ => iced::Color::WHITE,
+                        1..=4 => Color::from_rgb(0.8, 0.2, 0.2),
+                        5 => Color::from_rgb(0.8, 0.8, 0.2),
+                        _ => Color::WHITE,
                     };
 
                     row![
@@ -160,15 +236,23 @@ impl RustacheGui {
         .spacing(10)
         .into();
 
-        let content = column![text(title_text).size(40), input, scrollable(tasks_view)]
+        let main_content = column![text(title_text).size(40), input, scrollable(tasks_view)]
             .spacing(20)
+            .padding(20)
             .max_width(800);
 
-        container(content)
+        // 3. ASSEMBLE LAYOUT
+        let layout = row![
+            sidebar,
+            Rule::vertical(1),
+            container(main_content)
+                .width(Length::Fill)
+                .center_x(Length::Fill)
+        ];
+
+        container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_x(Length::Fill)
-            .padding(20)
             .into()
     }
 
@@ -177,13 +261,32 @@ impl RustacheGui {
     }
 }
 
-// --- WRAPPERS TO FORCE TOKIO RUNTIME ---
+// --- WRAPPERS ---
 
-async fn connect_and_fetch_wrapper() -> Result<(RustyClient, Vec<TodoTask>), String> {
+async fn connect_and_fetch_wrapper() -> Result<
+    (
+        RustyClient,
+        Vec<CalendarListEntry>,
+        Vec<TodoTask>,
+        Option<String>,
+    ),
+    String,
+> {
     let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
     rt.spawn(async { connect_and_fetch().await })
         .await
-        .map_err(|e| e.to_string())? // Handle JoinError
+        .map_err(|e| e.to_string())?
+}
+
+async fn async_fetch_wrapper(client: RustyClient) -> Result<Vec<TodoTask>, String> {
+    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
+    rt.spawn(async move {
+        let mut tasks = client.get_tasks().await.map_err(|e| e.to_string())?;
+        tasks.sort();
+        Ok(tasks)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 async fn async_create_wrapper(client: RustyClient, task: TodoTask) -> Result<TodoTask, String> {
@@ -200,39 +303,50 @@ async fn async_update_wrapper(client: RustyClient, task: TodoTask) -> Result<Tod
         .map_err(|e| e.to_string())?
 }
 
-// --- CORE LOGIC (Same as before) ---
+// --- LOGIC ---
 
-async fn connect_and_fetch() -> Result<(RustyClient, Vec<TodoTask>), String> {
+async fn connect_and_fetch() -> Result<
+    (
+        RustyClient,
+        Vec<CalendarListEntry>,
+        Vec<TodoTask>,
+        Option<String>,
+    ),
+    String,
+> {
     let config = Config::load().map_err(|e| e.to_string())?;
     let mut client = RustyClient::new(&config.url, &config.username, &config.password)
         .map_err(|e| e.to_string())?;
 
+    // 1. Get Calendars
+    let calendars = client.get_calendars().await.unwrap_or_default();
+    let mut active_href = None;
+
+    // 2. Select Default
     if let Some(def_cal) = config.default_calendar {
-        if let Ok(cals) = client.get_calendars().await {
-            if let Some(found) = cals.iter().find(|c| c.name == def_cal || c.href == def_cal) {
-                client.set_calendar(&found.href);
-            } else {
-                client
-                    .discover_calendar()
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
+        if let Some(found) = calendars
+            .iter()
+            .find(|c| c.name == def_cal || c.href == def_cal)
+        {
+            client.set_calendar(&found.href);
+            active_href = Some(found.href.clone());
         } else {
-            client
-                .discover_calendar()
-                .await
-                .map_err(|e| e.to_string())?;
+            // Fallback
+            if let Ok(href) = client.discover_calendar().await {
+                active_href = Some(href);
+            }
         }
     } else {
-        client
-            .discover_calendar()
-            .await
-            .map_err(|e| e.to_string())?;
+        if let Ok(href) = client.discover_calendar().await {
+            active_href = Some(href);
+        }
     }
 
+    // 3. Fetch Tasks
     let mut tasks = client.get_tasks().await.map_err(|e| e.to_string())?;
     tasks.sort();
-    Ok((client, tasks))
+
+    Ok((client, calendars, tasks, active_href))
 }
 
 async fn async_create(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
