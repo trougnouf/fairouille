@@ -374,7 +374,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             let cursor_x = footer_area.x + 1 + prefix.len() as u16 + state.cursor_position as u16;
             let cursor_y = footer_area.y + 1;
 
-            f.set_cursor(cursor_x, cursor_y);
+            f.set_cursor_position((cursor_x, cursor_y));
         }
         InputMode::Normal => {
             let f_chunks = Layout::default()
