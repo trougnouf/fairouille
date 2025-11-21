@@ -14,7 +14,7 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        if let Some(proj_dirs) = ProjectDirs::from("com", "rustycal", "rustycal") {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "trougnouf", "rustache") {
             let config_path = proj_dirs.config_dir().join("config.toml");
 
             if config_path.exists() {

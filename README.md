@@ -1,11 +1,11 @@
-# RustyCal
+# Rustache
 
 A simple, elegant, and lightweight CalDAV task manager for the terminal, written in Rust.
 
 ## Features
 - **Vim-like Navigation:** `j`/`k` to move, `d` to delete, `Space` to toggle.
 - **Smart Input:** Add tasks naturally: `Buy Milk !1 @tomorrow`.
-- **Syncs Everywhere:** Fully compatible with CalDAV servers (Nextcloud, Radicale, iCloud, etc.).
+- **Syncs Everywhere:** Fully compatible with CalDAV servers (Currently tested with Radicale).
 - **Offline-First UI:** Optimistic UI updates for instant feedback.
 - **Multiple Calendars:** Sidebar support to switch between task lists.
 
@@ -18,15 +18,15 @@ A simple, elegant, and lightweight CalDAV task manager for the terminal, written
 
 2.  **Run:**
     ```bash
-    rustycal
+    rustache
     ```
 
 ## Configuration
 
-Create a config file at `~/.config/rustycal/config.toml` (Linux) or `~/Library/Application Support/com.rustycal.rustycal/config.toml` (Mac):
+Create a config file at `~/.config/rustache/config.toml` (Linux) or `~/Library/Application Support/com.rustache.rustache/config.toml` (Mac):
 
 ```toml
-url = "https://caldav.example.com/remote.php/dav/calendars/user/"
+url = "https://localhost:5232/trougnouf/"
 username = "myuser"
 password = "mypassword"
 default_calendar = "todo" # Optional: Auto-selects this list on startup
