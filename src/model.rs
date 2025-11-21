@@ -3,6 +3,13 @@ use icalendar::{Calendar, CalendarComponent, Component, Todo, TodoStatus};
 use std::cmp::Ordering;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+pub struct CalendarListEntry {
+    pub name: String,
+    pub href: String,
+    pub color: Option<String>, // WebDAV often sends colors like "#FF0000"
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Task {
     pub uid: String,

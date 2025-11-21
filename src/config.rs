@@ -8,11 +8,12 @@ pub struct Config {
     pub url: String,
     pub username: String,
     pub password: String,
+    // New Optional Field
+    pub default_calendar: Option<String>,
 }
 
 impl Config {
     pub fn load() -> Result<Self> {
-        // Looks in ~/.config/rustycal/config.toml (Linux)
         if let Some(proj_dirs) = ProjectDirs::from("com", "rustycal", "rustycal") {
             let config_path = proj_dirs.config_dir().join("config.toml");
 

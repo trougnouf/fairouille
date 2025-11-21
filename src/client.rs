@@ -1,15 +1,21 @@
-use crate::model::Task;
-use libdav::CalDavClient; 
-use libdav::dav::WebDavClient; 
+use crate::model::{CalendarListEntry, Task};
+use libdav::CalDavClient;
+use libdav::PropertyName;
+use libdav::dav::WebDavClient; // <--- FIX: Import from root, not ::dav::
 
 use http::Uri;
+use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use hyper_rustls::HttpsConnectorBuilder;
-use tower_http::auth::AddAuthorization;
 use std::sync::Arc;
+use tower_http::auth::AddAuthorization;
 
-type HttpsClient = AddAuthorization<Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, String>>;
+type HttpsClient = AddAuthorization<
+    Client<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        String,
+    >,
+>;
 
 pub struct RustyClient {
     client: CalDavClient<HttpsClient>,
@@ -18,10 +24,12 @@ pub struct RustyClient {
 
 impl RustyClient {
     pub fn new(url: &str, user: &str, pass: &str) -> Result<Self, String> {
-        let uri: Uri = url.parse().map_err(|e: http::uri::InvalidUri| e.to_string())?;
+        let uri: Uri = url
+            .parse()
+            .map_err(|e: http::uri::InvalidUri| e.to_string())?;
 
         let tls_config = rustls::ClientConfig::builder()
-            .dangerous() 
+            .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerifier))
             .with_no_client_auth();
 
@@ -45,7 +53,7 @@ impl RustyClient {
 
     pub async fn discover_calendar(&mut self) -> Result<String, String> {
         let base_path = self.client.base_url().path().to_string();
-        
+
         // Check provided URL first
         if let Ok(resources) = self.client.list_resources(&base_path).await {
             let has_ics = resources.iter().any(|r| r.href.ends_with(".ics"));
@@ -69,21 +77,74 @@ impl RustyClient {
                         }
                     }
                 }
-            },
-            _ => {} 
+            }
+            _ => {}
         }
 
         self.calendar_url = Some(base_path.clone());
         Ok(base_path)
     }
 
+    // NEW: Fetch list of calendars
+    pub async fn get_calendars(&self) -> Result<Vec<CalendarListEntry>, String> {
+        // 1. Find the Home Set (where calendars live)
+        let principal = self
+            .client
+            .find_current_user_principal()
+            .await
+            .map_err(|e| format!("Principal error: {:?}", e))?
+            .ok_or("No principal")?;
+
+        let homes = self
+            .client
+            .find_calendar_home_set(&principal)
+            .await
+            .map_err(|e| format!("Home error: {:?}", e))?;
+        let home_url = homes.first().ok_or("No home set")?;
+
+        // 2. Find actual collections
+        let collections = self
+            .client
+            .find_calendars(home_url)
+            .await
+            .map_err(|e| format!("Find calendars error: {:?}", e))?;
+
+        let mut calendars = Vec::new();
+
+        // 3. Fetch "displayname" for each calendar
+        for col in collections {
+            let prop_name = PropertyName::new("DAV:", "displayname");
+
+            let name = match self.client.get_property(&col.href, &prop_name).await {
+                Ok(Some(n)) => n,
+                _ => col.href.clone(),
+            };
+
+            calendars.push(CalendarListEntry {
+                name,
+                href: col.href,
+                color: None,
+            });
+        }
+
+        Ok(calendars)
+    }
+
+    pub fn set_calendar(&mut self, href: &str) {
+        self.calendar_url = Some(href.to_string());
+    }
+
     pub async fn get_tasks(&self) -> Result<Vec<Task>, String> {
         let cal_url = self.calendar_url.as_ref().ok_or("No calendar discovered")?;
 
-        let resources = self.client.list_resources(cal_url).await
+        let resources = self
+            .client
+            .list_resources(cal_url)
+            .await
             .map_err(|e| format!("Failed to list resources: {:?}", e))?;
 
-        let hrefs: Vec<String> = resources.iter()
+        let hrefs: Vec<String> = resources
+            .iter()
             .map(|r| r.href.clone())
             .filter(|h| h.ends_with(".ics"))
             .collect();
@@ -92,19 +153,23 @@ impl RustyClient {
             return Ok(vec![]);
         }
 
-        let fetched = self.client.get_calendar_resources(cal_url, &hrefs).await
-             .map_err(|e| format!("Fetch error: {:?}", e))?;
+        let fetched = self
+            .client
+            .get_calendar_resources(cal_url, &hrefs)
+            .await
+            .map_err(|e| format!("Fetch error: {:?}", e))?;
 
         let mut tasks = Vec::new();
 
         for item in fetched {
             if let Ok(content) = item.content {
-                let body = content.data; 
+                let body = content.data;
                 let etag = content.etag;
-                
-                if body.is_empty() { continue; }
 
-                // Pass the href from the item so we know where to update later
+                if body.is_empty() {
+                    continue;
+                }
+
                 if let Ok(task) = Task::from_ics(&body, etag, item.href) {
                     tasks.push(task);
                 }
@@ -115,46 +180,32 @@ impl RustyClient {
     }
 
     pub async fn update_task(&self, task: &mut Task) -> Result<(), String> {
-            let ics_body = task.to_ics();
-            
-            // LOGGING
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("rustycal_debug.log") {
-                let _ = writeln!(file, "--- SENDING PUT to {} ---", task.href);
-                let _ = writeln!(file, "ETag: {}", task.etag);
-                let _ = writeln!(file, "Body:\n{}", ics_body);
-            }
+        let ics_body = task.to_ics();
+        let bytes = ics_body.as_bytes().to_vec();
 
-            let bytes = ics_body.as_bytes().to_vec();
+        let result = self
+            .client
+            .update_resource(
+                &task.href,
+                bytes,
+                &task.etag,
+                b"text/calendar; charset=utf-8; component=VTODO",
+            )
+            .await
+            .map_err(|e| format!("Update failed: {:?}", e))?;
 
-            // Note: Changed mime type to be more specific per RFC
-            let result = self.client.update_resource(
-                &task.href, 
-                bytes, 
-                &task.etag, 
-                b"text/calendar; charset=utf-8; component=VTODO"
-            ).await.map_err(|e| format!("Update failed: {:?}", e))?;
-
-            if let Some(new_etag) = result {
-                // LOGGING
-                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("rustycal_debug.log") {
-                    let _ = writeln!(file, "SUCCESS. New ETag: {}", new_etag);
-                }
-                task.etag = new_etag;
-            } else {
-                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("rustycal_debug.log") {
-                    let _ = writeln!(file, "SUCCESS. No new ETag returned.");
-                }
-            }
-            
-            Ok(())
+        if let Some(new_etag) = result {
+            task.etag = new_etag;
         }
+
+        Ok(())
+    }
 
     pub async fn create_task(&self, task: &mut Task) -> Result<(), String> {
         let cal_url = self.calendar_url.as_ref().ok_or("No calendar")?;
-        
+
         let filename = format!("{}.ics", task.uid);
-        
+
         // Construct URL (Naive join)
         let full_href = if cal_url.ends_with('/') {
             format!("{}{}", cal_url, filename)
@@ -167,11 +218,11 @@ impl RustyClient {
         let ics_body = task.to_ics();
         let bytes = ics_body.as_bytes().to_vec();
 
-        let result = self.client.create_resource(
-            &full_href, 
-            bytes, 
-            b"text/calendar"
-        ).await.map_err(|e| format!("Create failed: {:?}", e))?;
+        let result = self
+            .client
+            .create_resource(&full_href, bytes, b"text/calendar")
+            .await
+            .map_err(|e| format!("Create failed: {:?}", e))?;
 
         if let Some(new_etag) = result {
             task.etag = new_etag;
@@ -181,14 +232,13 @@ impl RustyClient {
     }
 
     pub async fn delete_task(&self, task: &Task) -> Result<(), String> {
-        // Delete requires the Href (URL) and the ETag (to prevent race conditions)
-        self.client.delete(&task.href, &task.etag).await
+        self.client
+            .delete(&task.href, &task.etag)
+            .await
             .map_err(|e| format!("Delete failed: {:?}", e))?;
         Ok(())
     }
-
-} 
-// End of impl RustyClient
+}
 
 // --- VERIFIER ---
 #[derive(Debug)]
