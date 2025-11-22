@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Rustache
+Comment=Elegant CalDAV Task Manager
+Exec=rustache-gui
+Terminal=false
+Type=Application
+Categories=Office;Utility;
+Keywords=todo;caldav;task;
+# Icon=rustache

@@ -1,6 +1,6 @@
 [package]
 name = "rustache"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 default-run = "tui" # Default to TUI when running 'cargo run'
 
