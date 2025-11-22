@@ -296,7 +296,12 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 None => "".to_string(),
             };
             let indent = "  ".repeat(t.depth);
-            let summary = format!("{}{} {}{}", indent, checkbox, t.summary, due_str);
+            let recur_str = if t.rrule.is_some() { " (R)" } else { "" };
+
+            let summary = format!(
+                "{}{}{} {}{}",
+                indent, checkbox, t.summary, due_str, recur_str
+            );
             ListItem::new(Line::from(vec![Span::styled(summary, style)]))
         })
         .collect();

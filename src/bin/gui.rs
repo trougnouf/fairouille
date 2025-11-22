@@ -27,14 +27,11 @@ struct RustacheGui {
     tasks: Vec<TodoTask>,
     calendars: Vec<CalendarListEntry>,
     active_cal_href: Option<String>,
-
     input_value: String,
-    description_value: String, // <--- NEW
+    description_value: String,
     search_value: String,
     editing_uid: Option<String>,
-
     expanded_tasks: HashSet<String>,
-
     client: Option<RustyClient>,
     loading: bool,
     error_msg: Option<String>,
@@ -61,19 +58,18 @@ impl Default for RustacheGui {
 #[derive(Debug, Clone)]
 enum Message {
     InputChanged(String),
-    DescriptionChanged(String), // <--- NEW
+    DescriptionChanged(String),
     SearchChanged(String),
     SubmitTask,
     ToggleTask(usize, bool),
     SelectCalendar(String),
     DeleteTask(usize),
     EditTaskStart(usize),
-    CancelEdit, // <--- NEW
+    CancelEdit,
     ChangePriority(usize, i8),
     IndentTask(usize),
     OutdentTask(usize),
     ToggleDetails(String),
-
     Loaded(
         Result<
             (
@@ -86,6 +82,7 @@ enum Message {
         >,
     ),
     SyncSaved(Result<TodoTask, String>),
+    SyncToggleComplete(Result<(TodoTask, Option<TodoTask>), String>),
     TasksRefreshed(Result<Vec<TodoTask>, String>),
     DeleteComplete(#[allow(dead_code)] Result<(), String>),
 }
@@ -108,7 +105,6 @@ impl RustacheGui {
                 }
                 Task::none()
             }
-
             Message::Loaded(Ok((client, cals, tasks, active))) => {
                 self.client = Some(client);
                 self.calendars = cals;
@@ -118,7 +114,7 @@ impl RustacheGui {
                 Task::none()
             }
             Message::Loaded(Err(e)) => {
-                self.error_msg = Some(format!("Connection Failed: {}", e));
+                self.error_msg = Some(format!("Connect: {}", e));
                 self.loading = false;
                 Task::none()
             }
@@ -135,13 +131,30 @@ impl RustacheGui {
                 self.error_msg = Some(format!("Sync Error: {}", e));
                 Task::none()
             }
+
+            Message::SyncToggleComplete(Ok((updated, created_opt))) => {
+                if let Some(index) = self.tasks.iter().position(|t| t.uid == updated.uid) {
+                    self.tasks[index] = updated;
+                }
+                if let Some(created) = created_opt {
+                    self.tasks.push(created);
+                }
+                let raw = self.tasks.clone();
+                self.tasks = TodoTask::organize_hierarchy(raw);
+                Task::none()
+            }
+            Message::SyncToggleComplete(Err(e)) => {
+                self.error_msg = Some(format!("Toggle Error: {}", e));
+                Task::none()
+            }
+
             Message::TasksRefreshed(Ok(tasks)) => {
                 self.tasks = TodoTask::organize_hierarchy(tasks);
                 self.loading = false;
                 Task::none()
             }
             Message::TasksRefreshed(Err(e)) => {
-                self.error_msg = Some(format!("Fetch Error: {}", e));
+                self.error_msg = Some(format!("Fetch: {}", e));
                 self.loading = false;
                 Task::none()
             }
@@ -180,7 +193,6 @@ impl RustacheGui {
                 }
                 Task::none()
             }
-
             Message::CancelEdit => {
                 self.input_value.clear();
                 self.description_value.clear();
@@ -224,13 +236,18 @@ impl RustacheGui {
                 Task::none()
             }
 
-            Message::ToggleTask(index, is_checked) => {
+            Message::ToggleTask(index, _checked) => {
                 if let Some(task) = self.tasks.get_mut(index) {
-                    task.completed = is_checked;
+                    // Optimistic flip
+                    task.completed = !task.completed;
+                    // Prepare clone for server (pre-flip state because toggle_task flips it)
+                    let mut task_for_server = task.clone();
+                    task_for_server.completed = !task_for_server.completed;
+
                     if let Some(client) = &self.client {
                         return Task::perform(
-                            async_update_wrapper(client.clone(), task.clone()),
-                            Message::SyncSaved,
+                            async_toggle_wrapper(client.clone(), task_for_server),
+                            Message::SyncToggleComplete,
                         );
                     }
                 }
@@ -364,11 +381,10 @@ impl RustacheGui {
             .padding(5)
             .size(16);
 
-        // --- DYNAMIC FOOTER ---
         let input_placeholder = if self.editing_uid.is_some() {
-            "Edit Title (Smart tags allowed)..."
+            "Edit Title..."
         } else {
-            "Add a task (Buy Milk !1 @tomorrow)..."
+            "Add task (Buy cat food !1 @daily)..."
         };
         let input_title = text_input(input_placeholder, &self.input_value)
             .on_input(Message::InputChanged)
@@ -377,22 +393,20 @@ impl RustacheGui {
             .size(20);
 
         let footer_content: Element<_> = if self.editing_uid.is_some() {
-            let input_desc = text_input("Description / Notes...", &self.description_value)
+            let input_desc = text_input("Notes...", &self.description_value)
                 .on_input(Message::DescriptionChanged)
                 .on_submit(Message::SubmitTask)
                 .padding(10)
                 .size(16);
-
             let cancel_btn = button(text("Cancel").size(16))
                 .style(button::secondary)
                 .on_press(Message::CancelEdit);
-            let save_btn = button(text("Save Changes").size(16))
+            let save_btn = button(text("Save").size(16))
                 .style(button::primary)
                 .on_press(Message::SubmitTask);
-
             column![
                 row![
-                    text("Editing Task")
+                    text("Editing")
                         .size(14)
                         .color(Color::from_rgb(0.7, 0.7, 1.0)),
                     horizontal_space(),
@@ -434,34 +448,54 @@ impl RustacheGui {
                         5 => Color::from_rgb(0.8, 0.8, 0.2),
                         _ => Color::WHITE,
                     };
+
                     let indent_size = if is_searching { 0 } else { task.depth * 20 };
                     let indent = horizontal_space().width(Length::Fixed(indent_size as f32));
+
                     let summary = text(&task.summary)
                         .size(20)
                         .color(color)
                         .width(Length::Fill);
-                    let date_content: Element<_> = match task.due {
+
+                    let date_text = match task.due {
                         Some(d) => text(d.format("%Y-%m-%d").to_string())
                             .size(14)
-                            .color(Color::from_rgb(0.5, 0.5, 0.5))
-                            .into(),
-                        None => horizontal_space().width(0).into(),
+                            .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                        None => text(""),
                     };
+                    let date_container = container(date_text)
+                        .width(Length::Fixed(90.0))
+                        .align_x(iced::alignment::Horizontal::Right);
+
+                    let recur_text = if task.rrule.is_some() {
+                        text("(R)").size(14).color(Color::from_rgb(0.6, 0.6, 1.0))
+                    } else {
+                        text("")
+                    };
+                    let recur_container = container(recur_text)
+                        .width(Length::Fixed(30.0))
+                        .align_x(iced::alignment::Horizontal::Center);
 
                     let btn_style = button::secondary;
                     let has_desc = !task.description.is_empty();
                     let is_expanded = self.expanded_tasks.contains(&task.uid);
+
+                    // Buttons center content by default, so setting width on the button is enough.
                     let info_btn = if has_desc {
-                        button(text("ℹ").size(12))
+                        button(text("i").size(12))
                             .style(if is_expanded {
                                 button::primary
                             } else {
                                 button::secondary
                             })
                             .padding(5)
+                            .width(Length::Fixed(25.0))
                             .on_press(Message::ToggleDetails(task.uid.clone()))
                     } else {
-                        button(text(" ").size(12)).style(button::text)
+                        button(text("").size(12))
+                            .style(button::text)
+                            .padding(5)
+                            .width(Length::Fixed(25.0))
                     };
 
                     let actions = row![
@@ -498,10 +532,11 @@ impl RustacheGui {
                         checkbox("", task.completed)
                             .on_toggle(move |b| Message::ToggleTask(real_index, b)),
                         summary,
-                        date_content,
+                        date_container,
+                        recur_container,
                         actions
                     ]
-                    .spacing(15)
+                    .spacing(10)
                     .align_y(iced::Alignment::Center);
 
                     let content: Element<_> = if is_expanded {
@@ -544,7 +579,6 @@ impl RustacheGui {
         .spacing(20)
         .padding(20)
         .max_width(800);
-
         let layout = row![
             sidebar,
             Rule::vertical(1),
@@ -602,6 +636,15 @@ async fn async_update_wrapper(client: RustyClient, task: TodoTask) -> Result<Tod
 async fn async_delete_wrapper(client: RustyClient, task: TodoTask) -> Result<(), String> {
     let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
     rt.spawn(async move { client.delete_task(&task).await })
+        .await
+        .map_err(|e| e.to_string())?
+}
+async fn async_toggle_wrapper(
+    client: RustyClient,
+    mut task: TodoTask,
+) -> Result<(TodoTask, Option<TodoTask>), String> {
+    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
+    rt.spawn(async move { client.toggle_task(&mut task).await })
         .await
         .map_err(|e| e.to_string())?
 }

@@ -1,0 +1,4 @@
+target/
+rustycal_debug.log
+Cargo.lock
+

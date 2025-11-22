@@ -18,7 +18,7 @@ enum Action {
     ToggleTask(usize),
     CreateTask(String),
     EditTask(usize, String),
-    EditDescription(usize, String), // <--- NEW
+    EditDescription(usize, String),
     DeleteTask(usize),
     ChangePriority(usize, i8),
     IndentTask(usize),
@@ -196,7 +196,6 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                // --- NEW DESCRIPTION HANDLER ---
                 Action::EditDescription(index, description) => {
                     if index < local_tasks.len() {
                         let task = &mut local_tasks[index];
@@ -225,14 +224,19 @@ async fn main() -> Result<()> {
                 Action::ToggleTask(index) => {
                     if index < local_tasks.len() {
                         let task = &mut local_tasks[index];
-                        task.completed = !task.completed;
                         let _ = event_tx
                             .send(AppEvent::Status("Syncing...".to_string()))
                             .await;
+                        // Note: Pass CLONE to toggle_task, because it flips it internally.
+                        // We actually need to pass the state *before* flip? No, we want to flip based on current.
                         let mut task_copy = task.clone();
-                        match client.update_task(&mut task_copy).await {
-                            Ok(_) => {
-                                local_tasks[index] = task_copy.clone();
+
+                        match client.toggle_task(&mut task_copy).await {
+                            Ok((updated, created_opt)) => {
+                                local_tasks[index] = updated;
+                                if let Some(created) = created_opt {
+                                    local_tasks.push(created);
+                                }
                                 local_tasks = Task::organize_hierarchy(local_tasks);
                                 let _ = event_tx
                                     .send(AppEvent::TasksLoaded(local_tasks.clone()))
@@ -241,7 +245,6 @@ async fn main() -> Result<()> {
                                     event_tx.send(AppEvent::Status("Synced.".to_string())).await;
                             }
                             Err(e) => {
-                                local_tasks[index].completed = !local_tasks[index].completed;
                                 let _ = event_tx
                                     .send(AppEvent::Error(format!("Sync Failed: {}", e)))
                                     .await;
@@ -412,193 +415,199 @@ async fn main() -> Result<()> {
                     MouseEventKind::ScrollUp => app_state.previous(),
                     _ => {}
                 },
-                Event::Key(key) => match app_state.mode {
-                    InputMode::Creating => match key.code {
-                        KeyCode::Enter => {
-                            if !app_state.input_buffer.is_empty() {
-                                let summary = app_state.input_buffer.clone();
-                                let _ = action_tx.send(Action::CreateTask(summary)).await;
+                Event::Key(key) => {
+                    match app_state.mode {
+                        InputMode::Creating => match key.code {
+                            KeyCode::Enter => {
+                                if !app_state.input_buffer.is_empty() {
+                                    let summary = app_state.input_buffer.clone();
+                                    let _ = action_tx.send(Action::CreateTask(summary)).await;
+                                    app_state.input_buffer.clear();
+                                    app_state.mode = InputMode::Normal;
+                                }
+                            }
+                            KeyCode::Esc => {
+                                app_state.mode = InputMode::Normal;
                                 app_state.input_buffer.clear();
+                            }
+                            KeyCode::Char(c) => app_state.enter_char(c),
+                            KeyCode::Backspace => app_state.delete_char(),
+                            _ => {}
+                        },
+
+                        InputMode::Editing => match key.code {
+                            KeyCode::Enter => {
+                                if let Some(idx) = app_state.editing_index {
+                                    let new_text = app_state.input_buffer.clone();
+                                    let _ = action_tx.send(Action::EditTask(idx, new_text)).await;
+                                }
+                                app_state.input_buffer.clear();
+                                app_state.editing_index = None;
                                 app_state.mode = InputMode::Normal;
                             }
-                        }
-                        KeyCode::Esc => {
-                            app_state.mode = InputMode::Normal;
-                            app_state.input_buffer.clear();
-                        }
-                        KeyCode::Char(c) => app_state.enter_char(c),
-                        KeyCode::Backspace => app_state.delete_char(),
-                        _ => {}
-                    },
-
-                    InputMode::Editing => match key.code {
-                        KeyCode::Enter => {
-                            if let Some(idx) = app_state.editing_index {
-                                let new_text = app_state.input_buffer.clone();
-                                let _ = action_tx.send(Action::EditTask(idx, new_text)).await;
+                            KeyCode::Esc => {
+                                app_state.mode = InputMode::Normal;
+                                app_state.input_buffer.clear();
+                                app_state.editing_index = None;
                             }
-                            app_state.input_buffer.clear();
-                            app_state.editing_index = None;
-                            app_state.mode = InputMode::Normal;
-                        }
-                        KeyCode::Esc => {
-                            app_state.mode = InputMode::Normal;
-                            app_state.input_buffer.clear();
-                            app_state.editing_index = None;
-                        }
-                        KeyCode::Char(c) => app_state.enter_char(c),
-                        KeyCode::Backspace => app_state.delete_char(),
-                        KeyCode::Left => app_state.move_cursor_left(),
-                        KeyCode::Right => app_state.move_cursor_right(),
-                        _ => {}
-                    },
+                            KeyCode::Char(c) => app_state.enter_char(c),
+                            KeyCode::Backspace => app_state.delete_char(),
+                            KeyCode::Left => app_state.move_cursor_left(),
+                            KeyCode::Right => app_state.move_cursor_right(),
+                            _ => {}
+                        },
 
-                    InputMode::EditingDescription => match key.code {
-                        KeyCode::Enter => {
-                            if let Some(idx) = app_state.editing_index {
-                                let new_desc = app_state.input_buffer.clone();
-                                let _ =
-                                    action_tx.send(Action::EditDescription(idx, new_desc)).await;
+                        InputMode::EditingDescription => match key.code {
+                            KeyCode::Enter => {
+                                if let Some(idx) = app_state.editing_index {
+                                    let new_desc = app_state.input_buffer.clone();
+                                    let _ = action_tx
+                                        .send(Action::EditDescription(idx, new_desc))
+                                        .await;
+                                }
+                                app_state.reset_input();
+                                app_state.editing_index = None;
+                                app_state.mode = InputMode::Normal;
                             }
-                            app_state.reset_input();
-                            app_state.editing_index = None;
-                            app_state.mode = InputMode::Normal;
-                        }
-                        KeyCode::Esc => {
-                            app_state.mode = InputMode::Normal;
-                            app_state.reset_input();
-                            app_state.editing_index = None;
-                        }
-                        KeyCode::Char(c) => app_state.enter_char(c),
-                        KeyCode::Backspace => app_state.delete_char(),
-                        KeyCode::Left => app_state.move_cursor_left(),
-                        KeyCode::Right => app_state.move_cursor_right(),
-                        _ => {}
-                    },
+                            KeyCode::Esc => {
+                                app_state.mode = InputMode::Normal;
+                                app_state.reset_input();
+                                app_state.editing_index = None;
+                            }
+                            KeyCode::Char(c) => app_state.enter_char(c),
+                            KeyCode::Backspace => app_state.delete_char(),
+                            KeyCode::Left => app_state.move_cursor_left(),
+                            KeyCode::Right => app_state.move_cursor_right(),
+                            _ => {}
+                        },
 
-                    InputMode::Searching => match key.code {
-                        KeyCode::Enter | KeyCode::Esc => {
-                            app_state.mode = InputMode::Normal;
-                        }
-                        KeyCode::Left => app_state.move_cursor_left(),
-                        KeyCode::Right => app_state.move_cursor_right(),
-                        KeyCode::Char(c) => {
-                            app_state.enter_char(c);
-                            app_state.recalculate_view();
-                        }
-                        KeyCode::Backspace => {
-                            app_state.delete_char();
-                            app_state.recalculate_view();
-                        }
-                        _ => {}
-                    },
+                        InputMode::Searching => match key.code {
+                            KeyCode::Enter | KeyCode::Esc => {
+                                app_state.mode = InputMode::Normal;
+                            }
+                            KeyCode::Left => app_state.move_cursor_left(),
+                            KeyCode::Right => app_state.move_cursor_right(),
+                            KeyCode::Char(c) => {
+                                app_state.enter_char(c);
+                                app_state.recalculate_view();
+                            }
+                            KeyCode::Backspace => {
+                                app_state.delete_char();
+                                app_state.recalculate_view();
+                            }
+                            _ => {}
+                        },
 
-                    InputMode::Normal => match key.code {
-                        KeyCode::Char('q') => {
-                            let _ = action_tx.send(Action::Quit).await;
-                            break;
-                        }
-                        KeyCode::Char('/') => {
-                            app_state.mode = InputMode::Searching;
-                            app_state.reset_input();
-                            app_state.recalculate_view();
-                        }
-                        KeyCode::Esc => {
-                            app_state.reset_input();
-                            app_state.recalculate_view();
-                        }
-                        KeyCode::Tab => app_state.toggle_focus(),
-                        KeyCode::Enter => {
-                            if app_state.active_focus == Focus::Sidebar {
-                                if let Some(idx) = app_state.cal_state.selected() {
-                                    if idx < app_state.calendars.len() {
-                                        let href = app_state.calendars[idx].href.clone();
-                                        let _ = action_tx.send(Action::SwitchCalendar(href)).await;
-                                        app_state.active_focus = Focus::Main;
+                        InputMode::Normal => match key.code {
+                            KeyCode::Char('q') => {
+                                let _ = action_tx.send(Action::Quit).await;
+                                break;
+                            }
+                            KeyCode::Char('/') => {
+                                app_state.mode = InputMode::Searching;
+                                app_state.reset_input();
+                                app_state.recalculate_view();
+                            }
+                            KeyCode::Esc => {
+                                app_state.reset_input();
+                                app_state.recalculate_view();
+                            }
+                            KeyCode::Tab => app_state.toggle_focus(),
+                            KeyCode::Enter => {
+                                if app_state.active_focus == Focus::Sidebar {
+                                    if let Some(idx) = app_state.cal_state.selected() {
+                                        if idx < app_state.calendars.len() {
+                                            let href = app_state.calendars[idx].href.clone();
+                                            let _ =
+                                                action_tx.send(Action::SwitchCalendar(href)).await;
+                                            app_state.active_focus = Focus::Main;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        KeyCode::Char('a') => {
-                            app_state.mode = InputMode::Creating;
-                            app_state.reset_input();
-                            app_state.message = "Example: Buy Milk @tomorrow !1".to_string();
-                        }
-                        KeyCode::Char('e') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let task = &app_state.tasks[idx];
-                                    app_state.mode = InputMode::Editing;
-                                    let text = task.to_smart_string();
-                                    app_state.input_buffer = text.clone();
-                                    app_state.cursor_position = text.chars().count();
-                                    app_state.editing_index = Some(idx);
+                            KeyCode::Char('a') => {
+                                app_state.mode = InputMode::Creating;
+                                app_state.reset_input();
+                                app_state.message =
+                                    "Example: Buy cat food @tomorrow !1".to_string();
+                            }
+                            KeyCode::Char('e') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let task = &app_state.tasks[idx];
+                                        app_state.mode = InputMode::Editing;
+                                        let text = task.to_smart_string();
+                                        app_state.input_buffer = text.clone();
+                                        app_state.cursor_position = text.chars().count();
+                                        app_state.editing_index = Some(idx);
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char('E') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let task = &app_state.tasks[idx];
-                                    app_state.mode = InputMode::EditingDescription;
-                                    let text = task.description.clone();
-                                    app_state.input_buffer = text.clone();
-                                    app_state.cursor_position = text.chars().count();
-                                    app_state.editing_index = Some(idx);
+                            KeyCode::Char('E') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let task = &app_state.tasks[idx];
+                                        app_state.mode = InputMode::EditingDescription;
+                                        let text = task.description.clone();
+                                        app_state.input_buffer = text.clone();
+                                        app_state.cursor_position = text.chars().count();
+                                        app_state.editing_index = Some(idx);
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => app_state.next(),
-                        KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
-                        KeyCode::PageDown => app_state.jump_forward(10),
-                        KeyCode::PageUp => app_state.jump_backward(10),
-                        KeyCode::Char(' ') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    app_state.tasks[idx].completed =
-                                        !app_state.tasks[idx].completed;
-                                    let _ = action_tx.send(Action::ToggleTask(idx)).await;
+                            KeyCode::Down | KeyCode::Char('j') => app_state.next(),
+                            KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
+                            KeyCode::PageDown => app_state.jump_forward(10),
+                            KeyCode::PageUp => app_state.jump_backward(10),
+                            KeyCode::Char(' ') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        // Optimistic UI handled by Action
+                                        let _ = action_tx.send(Action::ToggleTask(idx)).await;
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char('d') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let _ = action_tx.send(Action::DeleteTask(idx)).await;
+                            KeyCode::Char('d') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let _ = action_tx.send(Action::DeleteTask(idx)).await;
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char('+') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let _ = action_tx.send(Action::ChangePriority(idx, 1)).await;
+                            KeyCode::Char('+') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let _ =
+                                            action_tx.send(Action::ChangePriority(idx, 1)).await;
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char('-') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let _ = action_tx.send(Action::ChangePriority(idx, -1)).await;
+                            KeyCode::Char('-') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let _ =
+                                            action_tx.send(Action::ChangePriority(idx, -1)).await;
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char('.') | KeyCode::Char('>') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let _ = action_tx.send(Action::IndentTask(idx)).await;
+                            KeyCode::Char('.') | KeyCode::Char('>') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let _ = action_tx.send(Action::IndentTask(idx)).await;
+                                    }
                                 }
                             }
-                        }
-                        KeyCode::Char(',') | KeyCode::Char('<') => {
-                            if app_state.active_focus == Focus::Main {
-                                if let Some(idx) = app_state.get_selected_master_index() {
-                                    let _ = action_tx.send(Action::OutdentTask(idx)).await;
+                            KeyCode::Char(',') | KeyCode::Char('<') => {
+                                if app_state.active_focus == Focus::Main {
+                                    if let Some(idx) = app_state.get_selected_master_index() {
+                                        let _ = action_tx.send(Action::OutdentTask(idx)).await;
+                                    }
                                 }
                             }
-                        }
-                        _ => {}
-                    },
-                },
+                            _ => {}
+                        },
+                    }
+                }
                 _ => {}
             }
         }

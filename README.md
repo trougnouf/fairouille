@@ -2,12 +2,12 @@
 
 **Rustache** is a simple, elegant, and lightweight CalDAV task manager, written in Rust.
 
-It features both a lightning-fast **TUI (Terminal UI)** for keyboard warriors and a modern **GUI (Graphical UI)** for desktop integration.
+It features both a lightning-fast **TUI (Terminal UI)** and a modern **GUI (Graphical UI)** for desktop integration.
 
 ## Features
 
 *   **Dual Interface:** Run it in your terminal (`rustache`) or as a windowed app (`rustache-gui`).
-*   **Smart Input:** Add tasks naturally: `Buy Milk !1 @tomorrow` sets High Priority and Due Date automatically.
+*   **Smart Input:** Add tasks naturally: `Buy cat food !1 @tomorrow` sets High Priority and Due Date automatically.
 *   **Syncs Everywhere:** Fully compatible with standard CalDAV servers (Radicale, Nextcloud, iCloud, etc.).
 *   **Hierarchy Support:** Create sub-tasks and organize nested lists easily.
 *   **Multiple Calendars:** Seamlessly switch between "Work", "Personal", and other lists.
@@ -57,7 +57,7 @@ default_calendar = "Personal" # Optional: Auto-selects this list on startup
 | **Task List** | `j` / `k` | Move Down / Up |
 | | `Space` | **Toggle** Completion |
 | | `a` | **Add** Task (Type name, press Enter) |
-| | `e` | **Edit** Task |
+| | `e` | **Edit** Title (Shift+E for Description) |
 | | `d` | **Delete** Task |
 | | `/` | **Search** / Filter Tasks |
 | | `+` / `-` | Increase / Decrease **Priority** |
@@ -68,8 +68,16 @@ default_calendar = "Personal" # Optional: Auto-selects this list on startup
 When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the text:
 
 *   `!1` to `!9`: Sets Priority (1 is High, 9 is Low).
-*   `@tomorrow`, `@today`: Sets Due Date relative to now.
+*   `@tomorrow`, `@today`, `@next week`, `@next month`, `@next year`: Sets Due Date relative to now.
 *   `@2025-12-31`: Sets specific Due Date (YYYY-MM-DD).
+*   `@daily`, `@weekly`, `@monthly`, `@yearly`, `@every 4 days`, `@every 2 weeks`, etc: Sets Recurrence.
+
+## TODO
+* [ ] Local Cache (Offline Mode)
+* [ ] CLI Interface (non-interactive)
+* [ ] Unit Tests
+* [ ] Multi-calendar Search
+* [ ] Desktop Notifications
 
 ## License
 GPL3
