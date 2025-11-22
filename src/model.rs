@@ -1,12 +1,13 @@
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use icalendar::{Calendar, CalendarComponent, Component, Todo, TodoStatus};
 use rrule::RRuleSet;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use uuid::Uuid;
+use uuid::Uuid; // <--- Added
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)] // <--- Added Derives
 pub struct Task {
     pub uid: String,
     pub summary: String,
@@ -18,7 +19,7 @@ pub struct Task {
     pub etag: String,
     pub href: String,
     pub depth: usize,
-    pub rrule: Option<String>, // Raw RRULE string (e.g. "FREQ=DAILY")
+    pub rrule: Option<String>,
 }
 
 impl Task {
@@ -31,7 +32,6 @@ impl Task {
         let mut tokens = input.split_whitespace().peekable();
 
         while let Some(word) = tokens.next() {
-            // 1. Priority (!1 - !9)
             if word.starts_with('!') {
                 if let Ok(p) = word[1..].parse::<u8>() {
                     if p >= 1 && p <= 9 {
@@ -41,7 +41,6 @@ impl Task {
                 }
             }
 
-            // 2. Simple Recurrence (@daily, @yearly)
             if word == "@daily" {
                 self.rrule = Some("FREQ=DAILY".to_string());
                 continue;
@@ -59,9 +58,7 @@ impl Task {
                 continue;
             }
 
-            // 3. Interval Recurrence (@every X [day|week|month|year]s)
             if word == "@every" {
-                // ... (same as before) ...
                 if let Some(next_token) = tokens.peek() {
                     if let Ok(interval) = next_token.parse::<u32>() {
                         tokens.next();
@@ -78,6 +75,7 @@ impl Task {
                             } else {
                                 ""
                             };
+
                             if !freq.is_empty() {
                                 tokens.next();
                                 self.rrule = Some(format!("FREQ={};INTERVAL={}", freq, interval));
@@ -90,19 +88,13 @@ impl Task {
                 continue;
             }
 
-            // 4. Dates
             if word.starts_with('@') {
                 let val = &word[1..];
-
-                // A. Simple ISO Date
                 if let Ok(date) = NaiveDate::parse_from_str(val, "%Y-%m-%d") {
                     self.due = Some(date.and_hms_opt(23, 59, 59).unwrap().and_utc());
                     continue;
                 }
-
                 let now = Local::now().date_naive();
-
-                // B. Single word shortcuts
                 if val == "today" {
                     self.due = Some(now.and_hms_opt(23, 59, 59).unwrap().and_utc());
                     continue;
@@ -112,74 +104,32 @@ impl Task {
                     self.due = Some(d.and_hms_opt(23, 59, 59).unwrap().and_utc());
                     continue;
                 }
-
-                // C. Multi-word shortcuts (@next ...)
                 if val == "next" {
                     if let Some(unit_token) = tokens.peek() {
                         let unit = unit_token.to_lowercase();
-                        let mut offset_days = 0;
-                        let mut matched = false;
-
+                        let mut offset = 0;
                         if unit.starts_with("week") {
-                            offset_days = 7;
-                            matched = true;
+                            offset = 7;
                         } else if unit.starts_with("month") {
-                            offset_days = 30; // Approximation
-                            matched = true;
+                            offset = 30;
                         } else if unit.starts_with("year") {
-                            offset_days = 365;
-                            matched = true;
-                        } else if unit.starts_with("monday") {
-                            // Advanced: Find next monday (Skipped for brevity, but possible via Chrono)
+                            offset = 365;
                         }
 
-                        if matched {
-                            tokens.next(); // Consume unit
-                            let d = now + chrono::Duration::days(offset_days);
+                        if offset > 0 {
+                            tokens.next();
+                            let d = now + chrono::Duration::days(offset);
                             self.due = Some(d.and_hms_opt(23, 59, 59).unwrap().and_utc());
                             continue;
                         }
                     }
                 }
             }
-
             summary_words.push(word);
         }
         self.summary = summary_words.join(" ");
     }
 
-    pub fn respawn(&self) -> Option<Task> {
-        let rule_str = self.rrule.as_ref()?;
-        let due_utc = self.due?;
-        let dtstart = due_utc.format("%Y%m%dT%H%M%SZ").to_string();
-        let rrule_string = format!("DTSTART:{}\nRRULE:{}", dtstart, rule_str);
-
-        if let Ok(rrule_set) = RRuleSet::from_str(&rrule_string) {
-            // FIX 1: .all(2) returns RRuleResult { dates: Vec<DateTime>, ... }
-            // It does not return a Result, so we access .dates directly.
-            let result = rrule_set.all(2);
-            let dates = result.dates;
-
-            // The first date [0] is usually the start date. The second [1] is the next occurrence.
-            if dates.len() > 1 {
-                let next_due = dates[1];
-
-                let mut next_task = self.clone();
-                next_task.uid = Uuid::new_v4().to_string();
-                next_task.href = String::new();
-                next_task.etag = String::new();
-                next_task.completed = false;
-
-                // FIX 2: Use modern Chrono API
-                next_task.due = Some(Utc.from_utc_datetime(&next_due.naive_utc()));
-
-                return Some(next_task);
-            }
-        }
-        None
-    }
-
-    // Convert back to smart string so Edit Mode shows the rule
     pub fn to_smart_string(&self) -> String {
         let mut s = self.summary.clone();
         if self.priority > 0 {
@@ -188,37 +138,15 @@ impl Task {
         if let Some(d) = self.due {
             s.push_str(&format!(" @{}", d.format("%Y-%m-%d")));
         }
-
         if let Some(r) = &self.rrule {
-            // Parse raw RRULE to friendly string
-            // e.g. FREQ=WEEKLY;INTERVAL=2 -> @every 2 weeks
-            let parts: HashMap<&str, &str> = r
-                .split(';')
-                .filter_map(|part| part.split_once('='))
-                .collect();
-
-            let freq = parts.get("FREQ").unwrap_or(&"");
-            let interval = parts.get("INTERVAL").unwrap_or(&"1");
-
-            if *interval == "1" {
-                match *freq {
-                    "DAILY" => s.push_str(" @daily"),
-                    "WEEKLY" => s.push_str(" @weekly"),
-                    "MONTHLY" => s.push_str(" @monthly"),
-                    "YEARLY" => s.push_str(" @yearly"),
-                    _ => {}
-                }
-            } else {
-                let unit = match *freq {
-                    "DAILY" => "days",
-                    "WEEKLY" => "weeks",
-                    "MONTHLY" => "months",
-                    "YEARLY" => "years",
-                    _ => "",
-                };
-                if !unit.is_empty() {
-                    s.push_str(&format!(" @every {} {}", interval, unit));
-                }
+            if r == "FREQ=DAILY" {
+                s.push_str(" @daily");
+            } else if r == "FREQ=WEEKLY" {
+                s.push_str(" @weekly");
+            } else if r == "FREQ=MONTHLY" {
+                s.push_str(" @monthly");
+            } else if r == "FREQ=YEARLY" {
+                s.push_str(" @yearly");
             }
         }
         s
@@ -240,6 +168,29 @@ impl Task {
         };
         task.apply_smart_input(input);
         task
+    }
+
+    pub fn respawn(&self) -> Option<Task> {
+        let rule_str = self.rrule.as_ref()?;
+        let due_utc = self.due?;
+        let dtstart = due_utc.format("%Y%m%dT%H%M%SZ").to_string();
+        let rrule_string = format!("DTSTART:{}\nRRULE:{}", dtstart, rule_str);
+
+        if let Ok(rrule_set) = RRuleSet::from_str(&rrule_string) {
+            let result = rrule_set.all(2);
+            let dates = result.dates;
+            if dates.len() > 1 {
+                let next_due = dates[1];
+                let mut next_task = self.clone();
+                next_task.uid = Uuid::new_v4().to_string();
+                next_task.href = String::new();
+                next_task.etag = String::new();
+                next_task.completed = false;
+                next_task.due = Some(Utc.from_utc_datetime(&next_due.naive_utc()));
+                return Some(next_task);
+            }
+        }
+        None
     }
 
     pub fn organize_hierarchy(mut tasks: Vec<Task>) -> Vec<Task> {
@@ -445,7 +396,6 @@ mod tests {
         let t = Task::new("Buy Milk !1");
         assert_eq!(t.summary, "Buy Milk");
         assert_eq!(t.priority, 1);
-
         let t2 = Task::new("Low priority !9");
         assert_eq!(t2.priority, 9);
     }
@@ -454,7 +404,6 @@ mod tests {
     fn test_smart_input_date_absolute() {
         let t = Task::new("Tax Day @2025-04-15");
         assert_eq!(t.summary, "Tax Day");
-
         let expected = Utc.with_ymd_and_hms(2025, 4, 15, 23, 59, 59).unwrap();
         assert_eq!(t.due, Some(expected));
     }
@@ -463,57 +412,41 @@ mod tests {
     fn test_smart_input_recurrence() {
         let t = Task::new("Gym @daily");
         assert_eq!(t.rrule, Some("FREQ=DAILY".to_string()));
-
         let t2 = Task::new("Meeting @weekly");
         assert_eq!(t2.rrule, Some("FREQ=WEEKLY".to_string()));
-
         let t3 = Task::new("Review @every 2 weeks");
         assert_eq!(t3.rrule, Some("FREQ=WEEKLY;INTERVAL=2".to_string()));
     }
 
     #[test]
     fn test_recurrence_respawn() {
-        // Create a task due "Yesterday" that repeats daily
         let yesterday = Utc::now() - Duration::days(1);
         let mut t = Task::new("Daily Task");
         t.due = Some(yesterday);
         t.rrule = Some("FREQ=DAILY".to_string());
-
-        // Respawn should give us a task due "Today" (or strictly +1 day from due)
         let next = t.respawn().expect("Should respawn");
-
-        // Calculate expected (Yesterday + 1 day)
-        // Note: rrule calculation is precise, so we verify it moved forward
         assert!(next.due > t.due);
         assert_eq!(next.summary, "Daily Task");
         assert_eq!(next.completed, false);
-        assert_ne!(next.uid, t.uid); // Must have new UID
+        assert_ne!(next.uid, t.uid);
     }
 
     #[test]
     fn test_hierarchy_sorting() {
-        // Create unsorted list
         let mut t1 = Task::new("Child");
         let mut t2 = Task::new("Root");
         let mut t3 = Task::new("Grandchild");
-
         t1.uid = "child".to_string();
         t2.uid = "root".to_string();
         t3.uid = "grand".to_string();
-
         t1.parent_uid = Some("root".to_string());
         t3.parent_uid = Some("child".to_string());
-
-        let raw = vec![t3.clone(), t2.clone(), t1.clone()]; // Random order
+        let raw = vec![t3.clone(), t2.clone(), t1.clone()];
         let organized = Task::organize_hierarchy(raw);
-
-        // Expected order: Root -> Child -> Grandchild
         assert_eq!(organized[0].uid, "root");
         assert_eq!(organized[0].depth, 0);
-
         assert_eq!(organized[1].uid, "child");
         assert_eq!(organized[1].depth, 1);
-
         assert_eq!(organized[2].uid, "grand");
         assert_eq!(organized[2].depth, 2);
     }
@@ -524,9 +457,7 @@ mod tests {
         t.priority = 1;
         t.due = Some(Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap());
         t.rrule = Some("FREQ=WEEKLY".to_string());
-
         let s = t.to_smart_string();
-        // Note: Order of tags might vary depending on implementation, but logic is appended
         assert!(s.contains("Test"));
         assert!(s.contains("!1"));
         assert!(s.contains("@2025-12-31"));

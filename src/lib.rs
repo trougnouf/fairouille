@@ -1,8 +1,7 @@
+pub mod cache;
 pub mod client;
 pub mod config;
-pub mod model;
+pub mod model; // <--- NEW
 
-// We include the UI module in the library,
-// but ONLY if the "tui" feature is enabled.
 #[cfg(feature = "tui")]
 pub mod ui;

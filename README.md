@@ -73,7 +73,6 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 *   `@daily`, `@weekly`, `@monthly`, `@yearly`, `@every 4 days`, `@every 2 weeks`, etc: Sets Recurrence.
 
 ## TODO
-* [ ] Local Cache (Offline Mode)
 * [ ] CLI Interface (non-interactive)
 * [ ] Unit Tests
 * [ ] Multi-calendar Search

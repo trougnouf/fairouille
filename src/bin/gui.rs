@@ -1,3 +1,4 @@
+use rustache::cache::Cache;
 use rustache::client::RustyClient;
 use rustache::config::Config;
 use rustache::model::{CalendarListEntry, Task as TodoTask};
@@ -70,6 +71,7 @@ enum Message {
     IndentTask(usize),
     OutdentTask(usize),
     ToggleDetails(String),
+
     Loaded(
         Result<
             (
@@ -91,6 +93,7 @@ impl RustacheGui {
     fn new() -> (Self, Task<Message>) {
         (
             Self::default(),
+            // Start Network Sync directly
             Task::perform(connect_and_fetch_wrapper(), Message::Loaded),
         )
     }
@@ -105,16 +108,23 @@ impl RustacheGui {
                 }
                 Task::none()
             }
+
             Message::Loaded(Ok((client, cals, tasks, active))) => {
                 self.client = Some(client);
                 self.calendars = cals;
-                self.tasks = TodoTask::organize_hierarchy(tasks);
-                self.active_cal_href = active;
+                self.tasks = TodoTask::organize_hierarchy(tasks.clone());
+                self.active_cal_href = active.clone();
+
+                // SAVE INITIAL CACHE
+                if let Some(href) = &active {
+                    let _ = Cache::save(href, &tasks);
+                }
+
                 self.loading = false;
                 Task::none()
             }
             Message::Loaded(Err(e)) => {
-                self.error_msg = Some(format!("Connect: {}", e));
+                self.error_msg = Some(format!("Connection Failed: {}", e));
                 self.loading = false;
                 Task::none()
             }
@@ -124,6 +134,10 @@ impl RustacheGui {
                     self.tasks[index] = updated_task;
                     let raw = self.tasks.clone();
                     self.tasks = TodoTask::organize_hierarchy(raw);
+                    // SAVE CACHE
+                    if let Some(href) = &self.active_cal_href {
+                        let _ = Cache::save(href, &self.tasks);
+                    }
                 }
                 Task::none()
             }
@@ -141,6 +155,10 @@ impl RustacheGui {
                 }
                 let raw = self.tasks.clone();
                 self.tasks = TodoTask::organize_hierarchy(raw);
+                // SAVE CACHE
+                if let Some(href) = &self.active_cal_href {
+                    let _ = Cache::save(href, &self.tasks);
+                }
                 Task::none()
             }
             Message::SyncToggleComplete(Err(e)) => {
@@ -149,20 +167,33 @@ impl RustacheGui {
             }
 
             Message::TasksRefreshed(Ok(tasks)) => {
-                self.tasks = TodoTask::organize_hierarchy(tasks);
+                self.tasks = TodoTask::organize_hierarchy(tasks.clone());
+                // SAVE CACHE
+                if let Some(href) = &self.active_cal_href {
+                    let _ = Cache::save(href, &tasks);
+                }
                 self.loading = false;
                 Task::none()
             }
             Message::TasksRefreshed(Err(e)) => {
-                self.error_msg = Some(format!("Fetch: {}", e));
+                self.error_msg = Some(format!("Fetch Error: {}", e));
                 self.loading = false;
                 Task::none()
             }
 
             Message::SelectCalendar(href) => {
                 if let Some(client) = &mut self.client {
-                    self.loading = true;
                     self.active_cal_href = Some(href.clone());
+
+                    // --- INSTANT CACHE LOAD ---
+                    if let Ok(cached) = Cache::load(&href) {
+                        self.tasks = TodoTask::organize_hierarchy(cached);
+                    } else {
+                        self.tasks.clear();
+                    }
+                    // --------------------------
+
+                    self.loading = true;
                     client.set_calendar(&href);
                     return Task::perform(
                         async_fetch_wrapper(client.clone()),
@@ -238,12 +269,9 @@ impl RustacheGui {
 
             Message::ToggleTask(index, _checked) => {
                 if let Some(task) = self.tasks.get_mut(index) {
-                    // Optimistic flip
                     task.completed = !task.completed;
-                    // Prepare clone for server (pre-flip state because toggle_task flips it)
                     let mut task_for_server = task.clone();
                     task_for_server.completed = !task_for_server.completed;
-
                     if let Some(client) = &self.client {
                         return Task::perform(
                             async_toggle_wrapper(client.clone(), task_for_server),
@@ -258,6 +286,11 @@ impl RustacheGui {
                     self.tasks.remove(index);
                     let raw = self.tasks.clone();
                     self.tasks = TodoTask::organize_hierarchy(raw);
+                    // SAVE CACHE
+                    if let Some(href) = &self.active_cal_href {
+                        let _ = Cache::save(href, &self.tasks);
+                    }
+
                     if let Some(client) = &self.client {
                         return Task::perform(
                             async_delete_wrapper(client.clone(), task),
@@ -384,7 +417,7 @@ impl RustacheGui {
         let input_placeholder = if self.editing_uid.is_some() {
             "Edit Title..."
         } else {
-            "Add task (Buy cat food !1 @daily)..."
+            "Add task (Buy Milk !1 @daily)..."
         };
         let input_title = text_input(input_placeholder, &self.input_value)
             .on_input(Message::InputChanged)
@@ -448,40 +481,36 @@ impl RustacheGui {
                         5 => Color::from_rgb(0.8, 0.8, 0.2),
                         _ => Color::WHITE,
                     };
-
                     let indent_size = if is_searching { 0 } else { task.depth * 20 };
                     let indent = horizontal_space().width(Length::Fixed(indent_size as f32));
-
                     let summary = text(&task.summary)
                         .size(20)
                         .color(color)
                         .width(Length::Fill);
 
-                    let date_text = match task.due {
+                    let recur_indicator: Element<_> = if task.rrule.is_some() {
+                        text("(R)")
+                            .size(14)
+                            .color(Color::from_rgb(0.6, 0.6, 1.0))
+                            .into()
+                    } else {
+                        horizontal_space().width(0).into()
+                    };
+
+                    let date_content: Element<_> = match task.due {
                         Some(d) => text(d.format("%Y-%m-%d").to_string())
                             .size(14)
-                            .color(Color::from_rgb(0.5, 0.5, 0.5)),
-                        None => text(""),
+                            .color(Color::from_rgb(0.5, 0.5, 0.5))
+                            .into(),
+                        None => horizontal_space().width(0).into(),
                     };
-                    let date_container = container(date_text)
-                        .width(Length::Fixed(90.0))
-                        .align_x(iced::alignment::Horizontal::Right);
-
-                    let recur_text = if task.rrule.is_some() {
-                        text("(R)").size(14).color(Color::from_rgb(0.6, 0.6, 1.0))
-                    } else {
-                        text("")
-                    };
-                    let recur_container = container(recur_text)
-                        .width(Length::Fixed(30.0))
-                        .align_x(iced::alignment::Horizontal::Center);
 
                     let btn_style = button::secondary;
                     let has_desc = !task.description.is_empty();
                     let is_expanded = self.expanded_tasks.contains(&task.uid);
 
-                    // Buttons center content by default, so setting width on the button is enough.
                     let info_btn = if has_desc {
+                        // Removed .horizontal_alignment()
                         button(text("i").size(12))
                             .style(if is_expanded {
                                 button::primary
@@ -532,11 +561,15 @@ impl RustacheGui {
                         checkbox("", task.completed)
                             .on_toggle(move |b| Message::ToggleTask(real_index, b)),
                         summary,
-                        date_container,
-                        recur_container,
+                        container(date_content)
+                            .width(Length::Fixed(90.0))
+                            .align_x(iced::alignment::Horizontal::Right),
+                        container(recur_indicator)
+                            .width(Length::Fixed(30.0))
+                            .align_x(iced::alignment::Horizontal::Center),
                         actions
                     ]
-                    .spacing(10)
+                    .spacing(15)
                     .align_y(iced::Alignment::Center);
 
                     let content: Element<_> = if is_expanded {
