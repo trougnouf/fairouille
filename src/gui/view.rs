@@ -123,8 +123,8 @@ fn view_sidebar_calendars(app: &GuiApp) -> Element<'_, Message> {
 
 fn view_sidebar_categories(app: &GuiApp) -> Element<'_, Message> {
     let should_hide = app.hide_completed || app.hide_completed_in_tags;
-
     let all_cats = app.store.get_all_categories(should_hide);
+
     let logic_text = if app.match_all_categories {
         "Match: AND"
     } else {
@@ -142,7 +142,12 @@ fn view_sidebar_categories(app: &GuiApp) -> Element<'_, Message> {
         horizontal_space(),
         logic_btn
     ]
-    .align_y(iced::Alignment::Center);
+    .align_y(iced::Alignment::Center)
+    // FIX: Add right padding so the scrollbar doesn't cover the button
+    .padding(iced::Padding {
+        right: 15.0,
+        ..Default::default()
+    });
 
     if all_cats.is_empty() {
         return column![
