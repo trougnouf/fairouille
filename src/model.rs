@@ -468,3 +468,79 @@ pub struct CalendarListEntry {
     pub href: String,
     pub color: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Removed unused imports (Duration, TimeZone)
+
+    #[test]
+    fn test_smart_input_basics() {
+        // Removed 'mut'
+        let t = Task::new("Buy cat food !1");
+        assert_eq!(t.summary, "Buy cat food");
+        assert_eq!(t.priority, 1);
+    }
+
+    #[test]
+    fn test_smart_input_categories() {
+        // Removed 'mut'
+        let t = Task::new("Project meeting #work #urgent @tomorrow");
+        assert!(t.summary.contains("Project meeting"));
+        assert!(t.categories.contains(&"work".to_string()));
+        assert!(t.categories.contains(&"urgent".to_string()));
+        assert!(t.due.is_some());
+    }
+
+    #[test]
+    fn test_smart_input_recurrence() {
+        let t = Task::new("Gym @daily");
+        assert_eq!(t.rrule, Some("FREQ=DAILY".to_string()));
+        let t2 = Task::new("Review @every 2 weeks");
+        assert_eq!(t2.rrule, Some("FREQ=WEEKLY;INTERVAL=2".to_string()));
+    }
+
+    #[test]
+    fn test_ical_roundtrip_with_categories() {
+        let mut t = Task::new("Complex Task");
+        t.categories = vec!["tag1".to_string(), "tag2".to_string()];
+        t.priority = 5;
+        t.uid = "test-uid".to_string();
+
+        let ics = t.to_ics();
+
+        // Simulate server returning this ICS
+        // We pass dummy etag/href/cal_href for parsing test
+        let t2 = Task::from_ics(&ics, "etag".into(), "href".into(), "cal_href".into())
+            .expect("Should parse");
+
+        assert_eq!(t.summary, t2.summary);
+        assert_eq!(t.priority, t2.priority);
+        assert_eq!(t.categories.len(), 2);
+        assert!(t2.categories.contains(&"tag1".to_string()));
+        assert!(t2.categories.contains(&"tag2".to_string()));
+    }
+
+    #[test]
+    fn test_hierarchy_sorting() {
+        let mut t1 = Task::new("Child");
+        let mut t2 = Task::new("Root");
+        let mut t3 = Task::new("Grandchild");
+        t1.uid = "child".to_string();
+        t2.uid = "root".to_string();
+        t3.uid = "grand".to_string();
+
+        t1.parent_uid = Some("root".to_string());
+        t3.parent_uid = Some("child".to_string());
+
+        let raw = vec![t3.clone(), t2.clone(), t1.clone()];
+        let organized = Task::organize_hierarchy(raw);
+
+        assert_eq!(organized[0].uid, "root");
+        assert_eq!(organized[0].depth, 0);
+        assert_eq!(organized[1].uid, "child");
+        assert_eq!(organized[1].depth, 1);
+        assert_eq!(organized[2].uid, "grand");
+        assert_eq!(organized[2].depth, 2);
+    }
+}
