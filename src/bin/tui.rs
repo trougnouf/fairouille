@@ -75,9 +75,7 @@ async fn main() -> Result<()> {
         }
         default_hook(info);
     }));
-
     let config_result = config::Config::load();
-
     let (url, user, pass, default_cal) = match config_result {
         Ok(cfg) => (cfg.url, cfg.username, cfg.password, cfg.default_calendar),
         Err(_) => {
@@ -156,8 +154,11 @@ async fn main() -> Result<()> {
     let (action_tx, mut action_rx) = mpsc::channel(10);
     let (event_tx, mut event_rx) = mpsc::channel(10);
 
+    // ... inside src/bin/tui.rs ...
+
     tokio::spawn(async move {
-        let mut client = match RustyClient::new(&url, &user, &pass) {
+        // --- INITIALIZATION ---
+        let client = match RustyClient::new(&url, &user, &pass) {
             Ok(c) => c,
             Err(e) => {
                 let _ = event_tx.send(AppEvent::Error(e)).await;
@@ -190,7 +191,6 @@ async fn main() -> Result<()> {
                     .iter()
                     .find(|c| c.name == *def_name || c.href == *def_name)
                 {
-                    client.set_calendar(&found.href);
                     active_href = Some(found.href.clone());
                 }
             }
@@ -202,6 +202,7 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Load Cache
         if let Some(href) = &active_href {
             if let Ok(cached) = Cache::load(href) {
                 let organized = Task::organize_hierarchy(cached);
@@ -215,24 +216,30 @@ async fn main() -> Result<()> {
         let _ = event_tx
             .send(AppEvent::Status("Syncing...".to_string()))
             .await;
-        let mut local_tasks: Vec<Task> = match client.get_tasks().await {
-            Ok(t) => {
-                let organized = Task::organize_hierarchy(t.clone());
-                if let Some(href) = &active_href {
+
+        // Load Network
+        let mut local_tasks: Vec<Task> = if let Some(href) = &active_href {
+            match client.get_tasks(href).await {
+                Ok(t) => {
+                    let organized = Task::organize_hierarchy(t.clone());
                     let _ = Cache::save(href, &t);
+                    organized
                 }
-                organized
+                Err(e) => {
+                    let _ = event_tx.send(AppEvent::Error(e)).await;
+                    vec![]
+                }
             }
-            Err(e) => {
-                let _ = event_tx.send(AppEvent::Error(e)).await;
-                vec![]
-            }
+        } else {
+            vec![]
         };
+
         let _ = event_tx
             .send(AppEvent::TasksLoaded(local_tasks.clone()))
             .await;
         let _ = event_tx.send(AppEvent::Status("Ready.".to_string())).await;
 
+        // --- ACTION LOOP ---
         while let Some(action) = action_rx.recv().await {
             match action {
                 Action::Quit => break,
@@ -253,13 +260,10 @@ async fn main() -> Result<()> {
                         let _ = event_tx.send(AppEvent::TasksLoaded(vec![])).await;
                     }
 
-                    client.set_calendar(&href);
-                    match client.get_tasks().await {
+                    match client.get_tasks(&href).await {
                         Ok(t) => {
                             local_tasks = Task::organize_hierarchy(t.clone());
-                            if let Some(href) = &active_href {
-                                let _ = Cache::save(href, &t);
-                            } // Inline save
+                            let _ = Cache::save(&href, &t);
                             let _ = event_tx
                                 .send(AppEvent::TasksLoaded(local_tasks.clone()))
                                 .await;
@@ -272,27 +276,33 @@ async fn main() -> Result<()> {
                 }
 
                 Action::CreateTask(summary) => {
-                    let _ = event_tx
-                        .send(AppEvent::Status("Creating...".to_string()))
-                        .await;
-                    let mut new_task = Task::new(&summary);
-                    match client.create_task(&mut new_task).await {
-                        Ok(_) => {
-                            local_tasks.push(new_task);
-                            local_tasks = Task::organize_hierarchy(local_tasks);
-                            if let Some(href) = &active_href {
+                    if let Some(href) = &active_href {
+                        let _ = event_tx
+                            .send(AppEvent::Status("Creating...".to_string()))
+                            .await;
+                        let mut new_task = Task::new(&summary);
+                        new_task.calendar_href = href.clone(); // Set Parent
+
+                        match client.create_task(&mut new_task).await {
+                            Ok(_) => {
+                                local_tasks.push(new_task);
+                                local_tasks = Task::organize_hierarchy(local_tasks);
                                 let _ = Cache::save(href, &local_tasks);
+                                let _ = event_tx
+                                    .send(AppEvent::TasksLoaded(local_tasks.clone()))
+                                    .await;
+                                let _ = event_tx
+                                    .send(AppEvent::Status("Created.".to_string()))
+                                    .await;
                             }
-                            let _ = event_tx
-                                .send(AppEvent::TasksLoaded(local_tasks.clone()))
-                                .await;
-                            let _ = event_tx
-                                .send(AppEvent::Status("Created.".to_string()))
-                                .await;
+                            Err(e) => {
+                                let _ = event_tx.send(AppEvent::Error(e)).await;
+                            }
                         }
-                        Err(e) => {
-                            let _ = event_tx.send(AppEvent::Error(e)).await;
-                        }
+                    } else {
+                        let _ = event_tx
+                            .send(AppEvent::Error("No calendar selected".into()))
+                            .await;
                     }
                 }
 
@@ -417,6 +427,7 @@ async fn main() -> Result<()> {
                 Action::ChangePriority(index, delta) => {
                     if index < local_tasks.len() {
                         let task = &mut local_tasks[index];
+                        // Cycle priority logic
                         let new_prio = if delta > 0 {
                             match task.priority {
                                 0 => 9,
@@ -434,6 +445,7 @@ async fn main() -> Result<()> {
                                 _ => 0,
                             }
                         };
+
                         if new_prio != task.priority {
                             task.priority = new_prio;
                             let _ = event_tx
@@ -556,7 +568,6 @@ async fn main() -> Result<()> {
                 }
             }
         }
-
         if crossterm::event::poll(Duration::from_millis(50))? {
             let event = event::read()?;
             match event {

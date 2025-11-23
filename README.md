@@ -79,8 +79,7 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 *   `@daily`, `@weekly`, `@monthly`, `@yearly`, `@every 4 days`, `@every 2 weeks`, etc: Sets Recurrence.
 
 ## TODO
-* [ ] **Categories**! e.g. @cats:Leslie,todev,short,home_improvement
-* [ ] AUR: cfait-git
+* [ ] Browse by categories (multi-calendar)
 * [ ] TUI: clickable
 * [ ] CLI interface (non-interactive, e.g. --add-task or -a)
 * [ ] Unit Tests
@@ -91,7 +90,6 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 * [ ] TUI: cursor when naming tasks
 * [ ] TUI: list keywords when naming tasks
 * [ ] switch this todo to cfait and version control it here
-* [x] rename
 * [ ] move to gitlab-ci?
 * [ ] publish crate
 

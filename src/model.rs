@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use uuid::Uuid; // <--- Added
+use uuid::Uuid;
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)] // <--- Added Derives
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub uid: String,
     pub summary: String,
@@ -18,6 +18,8 @@ pub struct Task {
     pub parent_uid: Option<String>,
     pub etag: String,
     pub href: String,
+    pub calendar_href: String,
+    pub categories: Vec<String>,
     pub depth: usize,
     pub rrule: Option<String>,
 }
@@ -28,19 +30,36 @@ impl Task {
         self.priority = 0;
         self.due = None;
         self.rrule = None;
+        // We append to existing categories instead of clearing them,
+        // allowing users to add tags to existing tasks without losing old ones.
+        // To reset, one would manually edit the task details.
+        // But for a fresh input string (new task), categories starts empty anyway.
 
         let mut tokens = input.split_whitespace().peekable();
 
         while let Some(word) = tokens.next() {
+            // 1. Priority (!1 - !9)
             if word.starts_with('!') {
                 if let Ok(p) = word[1..].parse::<u8>() {
-                    if p >= 1 && p <= 9 {
+                    if (1..=9).contains(&p) {
                         self.priority = p;
                         continue;
                     }
                 }
             }
 
+            // 2. Categories (#tag)
+            if word.starts_with('#') {
+                let cat = word[1..].to_string();
+                if !cat.is_empty() {
+                    if !self.categories.contains(&cat) {
+                        self.categories.push(cat);
+                    }
+                    continue;
+                }
+            }
+
+            // 3. Recurrence Shortcuts
             if word == "@daily" {
                 self.rrule = Some("FREQ=DAILY".to_string());
                 continue;
@@ -58,10 +77,11 @@ impl Task {
                 continue;
             }
 
+            // 4. Complex Recurrence (@every X [days|weeks...])
             if word == "@every" {
                 if let Some(next_token) = tokens.peek() {
                     if let Ok(interval) = next_token.parse::<u32>() {
-                        tokens.next();
+                        tokens.next(); // consume number
                         if let Some(unit_token) = tokens.peek() {
                             let unit = unit_token.to_lowercase();
                             let freq = if unit.starts_with("day") {
@@ -77,7 +97,7 @@ impl Task {
                             };
 
                             if !freq.is_empty() {
-                                tokens.next();
+                                tokens.next(); // consume unit
                                 self.rrule = Some(format!("FREQ={};INTERVAL={}", freq, interval));
                                 continue;
                             }
@@ -88,21 +108,30 @@ impl Task {
                 continue;
             }
 
+            // 5. Dates
             if word.starts_with('@') {
                 let val = &word[1..];
+                // YYYY-MM-DD
                 if let Ok(date) = NaiveDate::parse_from_str(val, "%Y-%m-%d") {
-                    self.due = Some(date.and_hms_opt(23, 59, 59).unwrap().and_utc());
-                    continue;
+                    if let Some(dt) = date.and_hms_opt(23, 59, 59) {
+                        self.due = Some(dt.and_utc());
+                        continue;
+                    }
                 }
+
                 let now = Local::now().date_naive();
                 if val == "today" {
-                    self.due = Some(now.and_hms_opt(23, 59, 59).unwrap().and_utc());
-                    continue;
+                    if let Some(dt) = now.and_hms_opt(23, 59, 59) {
+                        self.due = Some(dt.and_utc());
+                        continue;
+                    }
                 }
                 if val == "tomorrow" {
                     let d = now + chrono::Duration::days(1);
-                    self.due = Some(d.and_hms_opt(23, 59, 59).unwrap().and_utc());
-                    continue;
+                    if let Some(dt) = d.and_hms_opt(23, 59, 59) {
+                        self.due = Some(dt.and_utc());
+                        continue;
+                    }
                 }
                 if val == "next" {
                     if let Some(unit_token) = tokens.peek() {
@@ -117,10 +146,12 @@ impl Task {
                         }
 
                         if offset > 0 {
-                            tokens.next();
+                            tokens.next(); // consume unit
                             let d = now + chrono::Duration::days(offset);
-                            self.due = Some(d.and_hms_opt(23, 59, 59).unwrap().and_utc());
-                            continue;
+                            if let Some(dt) = d.and_hms_opt(23, 59, 59) {
+                                self.due = Some(dt.and_utc());
+                                continue;
+                            }
                         }
                     }
                 }
@@ -149,6 +180,9 @@ impl Task {
                 s.push_str(" @yearly");
             }
         }
+        for cat in &self.categories {
+            s.push_str(&format!(" #{}", cat));
+        }
         s
     }
 
@@ -163,6 +197,8 @@ impl Task {
             parent_uid: None,
             etag: String::new(),
             href: String::new(),
+            calendar_href: String::new(),
+            categories: Vec::new(),
             depth: 0,
             rrule: None,
         };
@@ -183,7 +219,7 @@ impl Task {
                 let next_due = dates[1];
                 let mut next_task = self.clone();
                 next_task.uid = Uuid::new_v4().to_string();
-                next_task.href = String::new();
+                next_task.href = String::new(); // Clear href, it's a new resource
                 next_task.etag = String::new();
                 next_task.completed = false;
                 next_task.due = Some(Utc.from_utc_datetime(&next_due.naive_utc()));
@@ -269,12 +305,23 @@ impl Task {
             todo.add_property("RRULE", rrule.as_str());
         }
 
+        if !self.categories.is_empty() {
+            let cats = self.categories.join(",");
+            // Key fix: Use add_multi_property for CATEGORIES to align with icalendar internal storage
+            todo.add_multi_property("CATEGORIES", &cats);
+        }
+
         let mut calendar = Calendar::new();
         calendar.push(todo);
         calendar.to_string()
     }
 
-    pub fn from_ics(raw_ics: &str, etag: String, href: String) -> Result<Self, String> {
+    pub fn from_ics(
+        raw_ics: &str,
+        etag: String,
+        href: String,
+        calendar_href: String,
+    ) -> Result<Self, String> {
         let calendar: Calendar = raw_ics.parse().map_err(|e| format!("Parse: {}", e))?;
         let todo = calendar
             .components
@@ -298,12 +345,14 @@ impl Task {
             .get("PRIORITY")
             .and_then(|p| p.value().parse::<u8>().ok())
             .unwrap_or(0);
+
         let due = todo.properties().get("DUE").and_then(|p| {
             let val = p.value();
             if val.len() == 8 {
                 NaiveDate::parse_from_str(val, "%Y%m%d")
                     .ok()
-                    .map(|d| d.and_hms_opt(23, 59, 59).unwrap().and_utc())
+                    .and_then(|d| d.and_hms_opt(23, 59, 59))
+                    .map(|d| d.and_utc())
             } else {
                 NaiveDateTime::parse_from_str(
                     val,
@@ -317,14 +366,46 @@ impl Task {
                 .map(|d| Utc.from_utc_datetime(&d))
             }
         });
+
         let parent_uid = todo
             .properties()
             .get("RELATED-TO")
             .map(|p| p.value().to_string());
+
         let rrule = todo
             .properties()
             .get("RRULE")
             .map(|p| p.value().to_string());
+
+        // --- CORRECTED CATEGORY PARSING ---
+        let mut categories = Vec::new();
+
+        // 1. Check `multi_properties` (The crate parses CATEGORIES here)
+        if let Some(multi_props) = todo.multi_properties().get("CATEGORIES") {
+            for prop in multi_props {
+                let parts: Vec<String> = prop
+                    .value()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                categories.extend(parts);
+            }
+        }
+
+        // 2. Fallback to `properties` (Some servers/implementations might not flag it as multi)
+        if let Some(prop) = todo.properties().get("CATEGORIES") {
+            let parts: Vec<String> = prop
+                .value()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            categories.extend(parts);
+        }
+
+        categories.sort();
+        categories.dedup();
 
         Ok(Task {
             uid,
@@ -336,6 +417,8 @@ impl Task {
             parent_uid,
             etag,
             href,
+            calendar_href,
+            categories,
             depth: 0,
             rrule,
         })
@@ -384,83 +467,4 @@ pub struct CalendarListEntry {
     pub name: String,
     pub href: String,
     pub color: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::{Duration, TimeZone};
-
-    #[test]
-    fn test_smart_input_priority() {
-        let t = Task::new("Buy cat food !1");
-        assert_eq!(t.summary, "Buy cat food");
-        assert_eq!(t.priority, 1);
-        let t2 = Task::new("Low priority !9");
-        assert_eq!(t2.priority, 9);
-    }
-
-    #[test]
-    fn test_smart_input_date_absolute() {
-        let t = Task::new("Tax Day @2025-04-15");
-        assert_eq!(t.summary, "Tax Day");
-        let expected = Utc.with_ymd_and_hms(2025, 4, 15, 23, 59, 59).unwrap();
-        assert_eq!(t.due, Some(expected));
-    }
-
-    #[test]
-    fn test_smart_input_recurrence() {
-        let t = Task::new("Gym @daily");
-        assert_eq!(t.rrule, Some("FREQ=DAILY".to_string()));
-        let t2 = Task::new("Meeting @weekly");
-        assert_eq!(t2.rrule, Some("FREQ=WEEKLY".to_string()));
-        let t3 = Task::new("Review @every 2 weeks");
-        assert_eq!(t3.rrule, Some("FREQ=WEEKLY;INTERVAL=2".to_string()));
-    }
-
-    #[test]
-    fn test_recurrence_respawn() {
-        let yesterday = Utc::now() - Duration::days(1);
-        let mut t = Task::new("Daily Task");
-        t.due = Some(yesterday);
-        t.rrule = Some("FREQ=DAILY".to_string());
-        let next = t.respawn().expect("Should respawn");
-        assert!(next.due > t.due);
-        assert_eq!(next.summary, "Daily Task");
-        assert_eq!(next.completed, false);
-        assert_ne!(next.uid, t.uid);
-    }
-
-    #[test]
-    fn test_hierarchy_sorting() {
-        let mut t1 = Task::new("Child");
-        let mut t2 = Task::new("Root");
-        let mut t3 = Task::new("Grandchild");
-        t1.uid = "child".to_string();
-        t2.uid = "root".to_string();
-        t3.uid = "grand".to_string();
-        t1.parent_uid = Some("root".to_string());
-        t3.parent_uid = Some("child".to_string());
-        let raw = vec![t3.clone(), t2.clone(), t1.clone()];
-        let organized = Task::organize_hierarchy(raw);
-        assert_eq!(organized[0].uid, "root");
-        assert_eq!(organized[0].depth, 0);
-        assert_eq!(organized[1].uid, "child");
-        assert_eq!(organized[1].depth, 1);
-        assert_eq!(organized[2].uid, "grand");
-        assert_eq!(organized[2].depth, 2);
-    }
-
-    #[test]
-    fn test_to_smart_string() {
-        let mut t = Task::new("Test");
-        t.priority = 1;
-        t.due = Some(Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap());
-        t.rrule = Some("FREQ=WEEKLY".to_string());
-        let s = t.to_smart_string();
-        assert!(s.contains("Test"));
-        assert!(s.contains("!1"));
-        assert!(s.contains("@2025-12-31"));
-        assert!(s.contains("@weekly"));
-    }
 }

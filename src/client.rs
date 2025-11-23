@@ -20,7 +20,7 @@ type HttpsClient = AddAuthorization<
 #[derive(Clone, Debug)]
 pub struct RustyClient {
     client: CalDavClient<HttpsClient>,
-    calendar_url: Option<String>,
+    // Removed stateful 'calendar_url'
 }
 
 impl RustyClient {
@@ -42,25 +42,26 @@ impl RustyClient {
         let webdav = WebDavClient::new(uri, auth_client);
         Ok(Self {
             client: CalDavClient::new(webdav),
-            calendar_url: None,
         })
     }
 
-    pub async fn discover_calendar(&mut self) -> Result<String, String> {
+    pub async fn discover_calendar(&self) -> Result<String, String> {
         let base_path = self.client.base_url().path().to_string();
+
+        // 1. Try directly if it looks like a calendar (resource list)
         if let Ok(resources) = self.client.list_resources(&base_path).await {
             if resources.iter().any(|r| r.href.ends_with(".ics")) {
-                self.calendar_url = Some(base_path.clone());
                 return Ok(base_path);
             }
         }
+
+        // 2. Try Principal -> Home Set -> First Calendar
         match self.client.find_current_user_principal().await {
             Ok(Some(principal)) => {
                 if let Ok(homes) = self.client.find_calendar_home_set(&principal).await {
                     if let Some(home_url) = homes.first() {
                         if let Ok(cals) = self.client.find_calendars(home_url).await {
                             if let Some(first) = cals.first() {
-                                self.calendar_url = Some(first.href.clone());
                                 return Ok(first.href.clone());
                             }
                         }
@@ -69,7 +70,8 @@ impl RustyClient {
             }
             _ => {}
         }
-        self.calendar_url = Some(base_path.clone());
+
+        // Fallback to base
         Ok(base_path)
     }
 
@@ -109,15 +111,10 @@ impl RustyClient {
         Ok(calendars)
     }
 
-    pub fn set_calendar(&mut self, href: &str) {
-        self.calendar_url = Some(href.to_string());
-    }
-
-    pub async fn get_tasks(&self) -> Result<Vec<Task>, String> {
-        let cal_url = self.calendar_url.as_ref().ok_or("No calendar")?;
+    pub async fn get_tasks(&self, calendar_href: &str) -> Result<Vec<Task>, String> {
         let resources = self
             .client
-            .list_resources(cal_url)
+            .list_resources(calendar_href)
             .await
             .map_err(|e| format!("{:?}", e))?;
         let hrefs: Vec<String> = resources
@@ -130,14 +127,20 @@ impl RustyClient {
         }
         let fetched = self
             .client
-            .get_calendar_resources(cal_url, &hrefs)
+            .get_calendar_resources(calendar_href, &hrefs)
             .await
             .map_err(|e| format!("{:?}", e))?;
         let mut tasks = Vec::new();
         for item in fetched {
             if let Ok(content) = item.content {
                 if !content.data.is_empty() {
-                    if let Ok(task) = Task::from_ics(&content.data, content.etag, item.href) {
+                    // Pass calendar_href so the task knows its parent
+                    if let Ok(task) = Task::from_ics(
+                        &content.data,
+                        content.etag,
+                        item.href,
+                        calendar_href.to_string(),
+                    ) {
                         tasks.push(task);
                     }
                 }
@@ -165,13 +168,18 @@ impl RustyClient {
     }
 
     pub async fn create_task(&self, task: &mut Task) -> Result<(), String> {
-        let cal_url = self.calendar_url.as_ref().ok_or("No calendar")?;
+        if task.calendar_href.is_empty() {
+            return Err("Task has no calendar assigned".to_string());
+        }
+        let cal_url = &task.calendar_href;
+
         let filename = format!("{}.ics", task.uid);
         let full_href = if cal_url.ends_with('/') {
             format!("{}{}", cal_url, filename)
         } else {
             format!("{}/{}", cal_url, filename)
         };
+
         task.href = full_href.clone();
         let bytes = task.to_ics().as_bytes().to_vec();
         let res = self
@@ -193,13 +201,13 @@ impl RustyClient {
         Ok(())
     }
 
-    // --- CORE LOGIC: Toggle & Respawn ---
     pub async fn toggle_task(&self, task: &mut Task) -> Result<(Task, Option<Task>), String> {
         task.completed = !task.completed;
         let next_task = if task.completed { task.respawn() } else { None };
 
         let mut created_task = None;
         if let Some(mut next) = next_task {
+            // Next task inherits calendar_href from the parent in respawn() (via clone)
             self.create_task(&mut next).await?;
             created_task = Some(next);
         }
@@ -208,6 +216,7 @@ impl RustyClient {
     }
 }
 
+// Reuse the existing verifier
 #[derive(Debug)]
 struct NoVerifier;
 impl rustls::client::danger::ServerCertVerifier for NoVerifier {
