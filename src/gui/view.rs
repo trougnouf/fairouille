@@ -293,26 +293,53 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
 }
 
 fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Element<'a, Message> {
-    let color = match task.priority {
-        1..=4 => Color::from_rgb(0.8, 0.2, 0.2),
-        5 => Color::from_rgb(0.8, 0.8, 0.2),
-        _ => Color::WHITE,
+    // 1. Check Blocked Status
+    let is_blocked = app.store.is_blocked(task);
+
+    let color = if is_blocked {
+        Color::from_rgb(0.5, 0.5, 0.5)
+    } else {
+        match task.priority {
+            1..=4 => Color::from_rgb(0.8, 0.2, 0.2),
+            5 => Color::from_rgb(0.8, 0.8, 0.2),
+            _ => Color::WHITE,
+        }
     };
 
-    // Only indent if in Calendar Mode and not Searching
     let show_indent = app.active_cal_href.is_some() && app.search_value.is_empty();
     let indent_size = if show_indent { task.depth * 20 } else { 0 };
     let indent = horizontal_space().width(Length::Fixed(indent_size as f32));
 
-    let summary = text(&task.summary)
-        .size(20)
-        .color(color)
-        .width(Length::Fill);
+    // 2. Title Row (Just Summary)
+    let title_row = row![
+        text(&task.summary)
+            .size(20)
+            .color(color)
+            .width(Length::Fill)
+    ]
+    .spacing(10);
 
-    let mut badges = row![].spacing(5);
+    // 3. Tags / Meta Row (Blocked Badge + Categories + Recurrence)
+    let mut tags_row: iced::widget::Row<'_, Message> = row![].spacing(5);
+
+    // [Blocked] Badge moved here
+    if is_blocked {
+        tags_row = tags_row.push(
+            container(text("[Blocked]").size(12).color(Color::WHITE))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgb(0.8, 0.2, 0.2).into()), // Red background for visibility
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .padding(3),
+        );
+    }
 
     for cat in &task.categories {
-        badges = badges.push(
+        tags_row = tags_row.push(
             container(text(format!("#{}", cat)).size(12).color(Color::BLACK))
                 .style(|_| container::Style {
                     background: Some(Color::from_rgb(0.6, 0.8, 1.0).into()),
@@ -327,7 +354,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
     }
 
     if task.rrule.is_some() {
-        badges = badges.push(text("(R)").size(14).color(Color::from_rgb(0.6, 0.6, 1.0)));
+        tags_row = tags_row.push(text("(R)").size(14).color(Color::from_rgb(0.6, 0.6, 1.0)));
     }
 
     let date_text = match task.due {
@@ -337,11 +364,12 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
         None => text(""),
     };
 
-    let btn_style = button::secondary;
+    // 4. Info Button
     let has_desc = !task.description.is_empty();
+    let has_deps = !task.dependencies.is_empty();
     let is_expanded = app.expanded_tasks.contains(&task.uid);
 
-    let info_btn = if has_desc {
+    let info_btn = if has_desc || has_deps {
         button(text("i").size(12))
             .style(if is_expanded {
                 button::primary
@@ -358,46 +386,95 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             .width(Length::Fixed(25.0))
     };
 
-    let actions = row![
-        info_btn,
+    // 5. Actions
+    let mut actions = row![info_btn].spacing(5);
+
+    if let Some(yanked) = &app.yanked_uid {
+        if *yanked != task.uid {
+            actions = actions.push(
+                button(text("Block").size(14))
+                    .style(button::secondary)
+                    .padding(5)
+                    .on_press(Message::AddDependency(task.uid.clone())),
+            );
+            actions = actions.push(
+                button(text("Child").size(14))
+                    .style(button::secondary)
+                    .padding(5)
+                    .on_press(Message::MakeChild(task.uid.clone())),
+            );
+        } else {
+            actions = actions.push(
+                button(text("Unlink").size(14))
+                    .style(button::primary)
+                    .padding(5)
+                    .on_press(Message::ClearYank),
+            );
+        }
+    } else {
+        actions = actions.push(
+            button(text("Link").size(14))
+                .style(button::secondary)
+                .padding(5)
+                .on_press(Message::YankTask(task.uid.clone())),
+        );
+    }
+
+    let btn_style = button::secondary;
+    actions = actions.push(
         button(text("+").size(14))
             .style(btn_style)
             .padding(5)
             .on_press(Message::ChangePriority(index, 1)),
+    );
+    actions = actions.push(
         button(text("-").size(14))
             .style(btn_style)
             .padding(5)
             .on_press(Message::ChangePriority(index, -1)),
+    );
+    actions = actions.push(
         button(text(">").size(14))
             .style(btn_style)
             .padding(5)
             .on_press(Message::IndentTask(index)),
+    );
+    actions = actions.push(
         button(text("<").size(14))
             .style(btn_style)
             .padding(5)
             .on_press(Message::OutdentTask(index)),
+    );
+    actions = actions.push(
         button(text("Edit").size(14))
             .style(btn_style)
             .padding(5)
             .on_press(Message::EditTaskStart(index)),
+    );
+    actions = actions.push(
         button(text("Del").size(14))
             .style(button::danger)
             .padding(5)
             .on_press(Message::DeleteTask(index)),
-    ]
-    .spacing(5);
+    );
+
+    // 6. Construct Main Row
+    // Cast tags_row to Element to avoid type inference issues
+    let tags_element: Element<'a, Message> = tags_row.into();
 
     let row_main = row![
         indent,
         checkbox("", task.completed).on_toggle(move |b| Message::ToggleTask(index, b)),
         column![
-            summary,
-            if !task.categories.is_empty() {
-                badges
+            title_row,
+            // Show tags line if there are tags OR recurrence OR task is blocked
+            if !task.categories.is_empty() || task.rrule.is_some() || is_blocked {
+                tags_element
             } else {
                 row![].into()
             }
         ]
+        .width(Length::Fill)
         .spacing(2),
         date_text,
         actions
@@ -415,7 +492,6 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
     if is_expanded {
         let mut details_col = column![].spacing(5);
 
-        // 1. Description
         if !task.description.is_empty() {
             details_col = details_col.push(
                 text(&task.description)
@@ -424,14 +500,12 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             );
         }
 
-        // 2. Blockers (Text only)
         if !task.dependencies.is_empty() {
             details_col = details_col.push(
                 text("[Blocked By]:")
                     .size(12)
                     .color(Color::from_rgb(0.8, 0.4, 0.4)),
             );
-
             for dep_uid in &task.dependencies {
                 let name = app
                     .store
@@ -439,7 +513,6 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
                     .unwrap_or_else(|| "Unknown Task".to_string());
                 let is_done = app.store.get_task_status(dep_uid).unwrap_or(false);
                 let check = if is_done { "[x]" } else { "[ ]" };
-
                 details_col = details_col.push(
                     text(format!(" {} {}", check, name))
                         .size(12)
@@ -452,7 +525,6 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             horizontal_space().width(Length::Fixed(indent_size as f32 + 30.0)),
             details_col
         ];
-
         container(column![padded_row, desc_row].spacing(5))
             .padding(5)
             .into()

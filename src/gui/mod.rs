@@ -526,6 +526,103 @@ impl GuiApp {
                 }
                 Task::none()
             }
+            Message::YankTask(uid) => {
+                self.yanked_uid = Some(uid);
+                Task::none()
+            }
+
+            // NEW: Clear the clipboard
+            Message::ClearYank => {
+                self.yanked_uid = None;
+                Task::none()
+            }
+
+            // NEW: Set Parent (Make Child)
+            Message::MakeChild(target_uid) => {
+                if let Some(parent_uid) = &self.yanked_uid {
+                    // Standard find-and-update logic
+                    let mut target_cal = None;
+                    let mut target_idx = 0;
+
+                    'outer: for (cal_href, tasks) in &self.store.calendars {
+                        for (i, t) in tasks.iter().enumerate() {
+                            if t.uid == target_uid {
+                                target_cal = Some(cal_href.clone());
+                                target_idx = i;
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    if let Some(cal_href) = target_cal {
+                        if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
+                            let task = &mut tasks[target_idx];
+
+                            // Prevent self-parenting or redundancy
+                            if task.uid != *parent_uid
+                                && task.parent_uid.as_ref() != Some(parent_uid)
+                            {
+                                task.parent_uid = Some(parent_uid.clone());
+
+                                let task_copy = task.clone();
+                                self.refresh_filtered_tasks(); // Refresh UI tree immediately
+
+                                if let Some(client) = &self.client {
+                                    return Task::perform(
+                                        async_update_wrapper(client.clone(), task_copy),
+                                        Message::SyncSaved,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::AddDependency(target_uid) => {
+                if let Some(blocker_uid) = &self.yanked_uid {
+                    // 1. Find target task in store
+                    // We need to scan all calendars because we don't know which cal the target is in
+                    // (unless we pass it, but scanning store is fast enough for GUI)
+                    let mut target_cal = None;
+                    let mut target_idx = 0;
+
+                    'outer: for (cal_href, tasks) in &self.store.calendars {
+                        for (i, t) in tasks.iter().enumerate() {
+                            if t.uid == target_uid {
+                                target_cal = Some(cal_href.clone());
+                                target_idx = i;
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    if let Some(cal_href) = target_cal {
+                        if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
+                            let task = &mut tasks[target_idx];
+
+                            // 2. Check if already exists or self-ref
+                            if task.uid != *blocker_uid && !task.dependencies.contains(blocker_uid)
+                            {
+                                task.dependencies.push(blocker_uid.clone());
+
+                                // 3. Save & Refresh
+                                let task_copy = task.clone();
+                                self.refresh_filtered_tasks();
+
+                                if let Some(client) = &self.client {
+                                    return Task::perform(
+                                        async_update_wrapper(client.clone(), task_copy),
+                                        Message::SyncSaved,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
         }
     }
 }

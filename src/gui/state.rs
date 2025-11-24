@@ -52,6 +52,8 @@ pub struct GuiApp {
     pub ob_user: String,
     pub ob_pass: String,
     pub ob_default_cal: Option<String>,
+
+    pub yanked_uid: Option<String>,
 }
 
 impl Default for GuiApp {
@@ -82,6 +84,7 @@ impl Default for GuiApp {
             ob_user: String::new(),
             ob_pass: String::new(),
             ob_default_cal: None,
+            yanked_uid: None,
         }
     }
 }

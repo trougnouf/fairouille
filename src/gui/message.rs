@@ -49,4 +49,8 @@ pub enum Message {
 
     ToggleHideCompleted(bool),
     ToggleHideCompletedInTags(bool),
+    YankTask(String),
+    ClearYank, // NEW: To un-select
+    AddDependency(String),
+    MakeChild(String), // NEW: To set parent_uid
 }

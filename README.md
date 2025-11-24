@@ -109,8 +109,8 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 * [ ] move to gitlab-ci?
 * [ ] publish crate
 * [ ] More Unit Tests
-* [ ] Implement RFC 9253 (Dependencies) in the GUI
+* [ ] Link to calendar events
+* [ ] Dynamic width (column + main)
 
 ## License
 GPL3
-```

@@ -388,6 +388,45 @@ pub async fn run() -> Result<()> {
                             let _ = action_tx.send(Action::Quit).await;
                             break;
                         }
+
+                        KeyCode::Esc => {
+                            app_state.reset_input();
+                            app_state.refresh_filtered_view(); // <--- FIXED NAME
+                            if app_state.yanked_uid.is_some() {
+                                app_state.yanked_uid = None;
+                                app_state.message = "Yank cleared.".to_string();
+                            }
+                        }
+
+                        // ADDED: 'c' to Make Child of Yanked
+                        KeyCode::Char('c') => {
+                            if let Some(parent_uid) = &app_state.yanked_uid {
+                                if let Some(view_task) = app_state.get_selected_task().cloned() {
+                                    // Check self-parenting
+                                    if view_task.uid == *parent_uid {
+                                        app_state.message = "Cannot be child of self!".to_string();
+                                    } else {
+                                        let href = view_task.calendar_href.clone();
+                                        if let Some(list) = app_state.store.calendars.get_mut(&href)
+                                        {
+                                            if let Some(t) =
+                                                list.iter_mut().find(|t| t.uid == view_task.uid)
+                                            {
+                                                t.parent_uid = Some(parent_uid.clone());
+                                                let t_clone = t.clone();
+                                                let _ = action_tx
+                                                    .send(Action::UpdateTask(t_clone))
+                                                    .await;
+                                            }
+                                        }
+                                        app_state.refresh_filtered_view();
+                                        app_state.message = "Parent set.".to_string();
+                                    }
+                                }
+                            } else {
+                                app_state.message = "Nothing yanked! Press 'y' first.".to_string();
+                            }
+                        }
                         KeyCode::Char('/') => {
                             app_state.mode = InputMode::Searching;
                             app_state.reset_input();

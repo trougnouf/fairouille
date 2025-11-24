@@ -244,11 +244,20 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
             let help_str = match state.active_focus {
                 Focus::Sidebar => match state.sidebar_mode {
-                    SidebarMode::Calendars => "Enter:Select | 2:Tags",
-                    SidebarMode::Categories => "Enter:Toggle | m:Match(AND/OR) | 1:Cals",
+                    SidebarMode::Calendars => "Enter:Select | 2:Tags".to_string(),
+                    SidebarMode::Categories => {
+                        "Enter:Toggle | m:Match(AND/OR) | 1:Cals".to_string()
+                    }
                 },
-                // ADDED: y:Yank | b:Block
-                Focus::Main => "/:Find | a:Add | e:Edit | d:Del | y:Yank | b:Block | H:Hide",
+                Focus::Main => {
+                    let mut s = "/:Find | a:Add | e:Edit | d:Del | y:Yank".to_string();
+                    // Only show Block/Child if something is in the clipboard
+                    if state.yanked_uid.is_some() {
+                        s.push_str(" | b:Block | c:Child");
+                    }
+                    s.push_str(" | H:Hide");
+                    s
+                }
             };
 
             let help = Paragraph::new(help_str)
