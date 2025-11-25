@@ -186,3 +186,115 @@ impl TaskStore {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Task;
+    use std::collections::{HashMap, HashSet};
+
+    // Helper to create a dummy task
+    // Updated to pass empty aliases to Task::new
+    fn make_task(uid: &str, summary: &str, cal: &str, cats: Vec<&str>, completed: bool) -> Task {
+        let aliases = HashMap::new();
+        let mut t = Task::new(summary, &aliases);
+        t.uid = uid.to_string();
+        t.calendar_href = cal.to_string();
+        t.categories = cats.iter().map(|s| s.to_string()).collect();
+        t.completed = completed;
+        t
+    }
+
+    #[test]
+    fn test_store_filter_calendar_isolation() {
+        let mut store = TaskStore::new();
+
+        let t1 = make_task("1", "Work Task", "cal_work", vec![], false);
+        let t2 = make_task("2", "Home Task", "cal_home", vec![], false);
+
+        store.insert("cal_work".into(), vec![t1]);
+        store.insert("cal_home".into(), vec![t2]);
+
+        // Filter for Work
+        let res = store.filter(Some("cal_work"), &HashSet::new(), false, "", false, false);
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].summary, "Work Task");
+
+        // Filter for Global (None)
+        let res_global = store.filter(None, &HashSet::new(), false, "", false, false);
+        assert_eq!(res_global.len(), 2);
+    }
+
+    #[test]
+    fn test_store_filter_categories_or() {
+        let mut store = TaskStore::new();
+        let t1 = make_task("1", "A", "c", vec!["urgent"], false);
+        let t2 = make_task("2", "B", "c", vec!["later"], false);
+        let t3 = make_task("3", "C", "c", vec!["urgent", "later"], false);
+        let t4 = make_task("4", "D", "c", vec![], false); // No tags
+
+        store.insert("c".into(), vec![t1, t2, t3, t4]);
+
+        let mut selected = HashSet::new();
+        selected.insert("urgent".to_string());
+        selected.insert("later".to_string());
+
+        // OR Logic: Should get A, B, C
+        let res = store.filter(None, &selected, false, "", false, false);
+        assert_eq!(res.len(), 3);
+    }
+
+    #[test]
+    fn test_store_filter_categories_and() {
+        let mut store = TaskStore::new();
+        let t1 = make_task("1", "A", "c", vec!["urgent"], false);
+        let t2 = make_task("2", "B", "c", vec!["later"], false);
+        let t3 = make_task("3", "C", "c", vec!["urgent", "later"], false);
+
+        store.insert("c".into(), vec![t1, t2, t3]);
+
+        let mut selected = HashSet::new();
+        selected.insert("urgent".to_string());
+        selected.insert("later".to_string());
+
+        // AND Logic: Should only get C
+        let res = store.filter(None, &selected, true, "", false, false);
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].summary, "C");
+    }
+
+    #[test]
+    fn test_visibility_completed() {
+        let mut store = TaskStore::new();
+        let t1 = make_task("1", "Active", "c", vec![], false);
+        let t2 = make_task("2", "Done", "c", vec![], true);
+
+        store.insert("c".into(), vec![t1, t2]);
+
+        // 1. Show All
+        let res = store.filter(None, &HashSet::new(), false, "", false, false);
+        assert_eq!(res.len(), 2);
+
+        // 2. Hide Completed Globally
+        let res_hidden = store.filter(None, &HashSet::new(), false, "", true, false);
+        assert_eq!(res_hidden.len(), 1);
+        assert_eq!(res_hidden[0].summary, "Active");
+    }
+
+    #[test]
+    fn test_visibility_completed_in_tags_view() {
+        let mut store = TaskStore::new();
+        let t1 = make_task("1", "Active", "c", vec![], false);
+        let t2 = make_task("2", "Done", "c", vec![], true);
+        store.insert("c".into(), vec![t1, t2]);
+
+        // Calendar View: hide_completed_in_tags should NOT affect it
+        let res_cal = store.filter(Some("c"), &HashSet::new(), false, "", false, true);
+        assert_eq!(res_cal.len(), 2);
+
+        // Global/Tag View: hide_completed_in_tags SHOULD affect it
+        let res_global = store.filter(None, &HashSet::new(), false, "", false, true);
+        assert_eq!(res_global.len(), 1);
+        assert_eq!(res_global[0].summary, "Active");
+    }
+}

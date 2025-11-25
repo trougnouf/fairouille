@@ -269,3 +269,79 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn dummy_task() -> Task {
+        Task::new("test", &HashMap::new())
+    }
+
+    #[test]
+    fn test_navigation_next_wraps() {
+        let mut state = AppState::new();
+        // Add 3 dummy tasks
+        state.tasks = vec![dummy_task(), dummy_task(), dummy_task()];
+
+        // Start at 0
+        state.list_state.select(Some(0));
+
+        state.next(); // 1
+        assert_eq!(state.list_state.selected(), Some(1));
+
+        state.next(); // 2
+        assert_eq!(state.list_state.selected(), Some(2));
+
+        state.next(); // Wrap to 0
+        assert_eq!(state.list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_navigation_previous_wraps() {
+        let mut state = AppState::new();
+        state.tasks = vec![dummy_task(), dummy_task(), dummy_task()];
+
+        state.list_state.select(Some(0));
+
+        state.previous(); // Wrap to last (2)
+        assert_eq!(state.list_state.selected(), Some(2));
+
+        state.previous(); // 1
+        assert_eq!(state.list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn test_navigation_empty_list_safety() {
+        let mut state = AppState::new();
+        state.tasks = vec![]; // Empty
+
+        // Should not panic
+        state.next();
+        state.previous();
+
+        // Selection should stay None or safe default, but definitely no panic
+    }
+
+    #[test]
+    fn test_cursor_clamping() {
+        let mut state = AppState::new();
+        state.input_buffer = "abc".to_string(); // len 3
+        state.cursor_position = 0;
+
+        state.move_cursor_right(); // 1
+        state.move_cursor_right(); // 2
+        state.move_cursor_right(); // 3 (after 'c')
+        state.move_cursor_right(); // Should stay 3
+
+        assert_eq!(state.cursor_position, 3);
+
+        state.move_cursor_left(); // 2
+        state.move_cursor_left(); // 1
+        state.move_cursor_left(); // 0
+        state.move_cursor_left(); // Should stay 0
+
+        assert_eq!(state.cursor_position, 0);
+    }
+}
