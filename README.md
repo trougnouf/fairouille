@@ -1,4 +1,5 @@
 # Cfait
+> Take control of your TODO list
 
 **Cfait** is a simple, elegant, and lightweight CalDAV task manager, written in Rust.
 
@@ -102,26 +103,6 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 *   `@daily`, `@weekly`, `@monthly`, `@yearly`, `@every 4 days`, `@every 2 weeks`, etc: Sets Recurrence.
 *   `#tag` (e.g. `#Gardening`) to set a tag / category.
 *   **Aliases:** If you have configured aliases (e.g. `groceries = ["home"]`), typing `#groceries` will automatically apply `#groceries` AND `#home`.
-
-## TODO
-* [ ] TUI: clickable
-* [ ] CLI interface (non-interactive, e.g. --add-task or -a)
-* [ ] Multi-calendar Search (Text search across everything)
-* [ ] Allow setting task reminder
-* [ ] Desktop Notifications
-* [ ] Add lightweight font w/ monochrome emojis (embedded font or iced_aw or ??? or use system standard font or use system standard icons)
-* [ ] TUI/GUI(/CLI): multiple instances ok
-* [ ] TUI: cursor when naming tasks
-* [ ] publish crate
-* [ ] More Unit Tests
-* [ ] Link to calendar events
-* [ ] Dynamic width (column + main)
-* [ ] set cutoff date s.t. timed dates are not always on top (e.g. 6-months default)
-* [ ] Don't list "calendars" which don't have tasks capabilities
-* [ ] Allow disabling some calendars
-* [ ] Allow moving tasks from one calendar to another
-* [ ] In tag view, setting to include either all or one calendar(s)
-* [ ] hide_completed_in_tags -> default to True
 
 ## License
 GPL3

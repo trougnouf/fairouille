@@ -21,16 +21,20 @@ pub fn run() -> iced::Result {
         .set(runtime)
         .expect("Failed to set global runtime");
 
-    iced::application("Cfait", GuiApp::update, GuiApp::view)
-        .theme(GuiApp::theme)
-        .window(window::Settings {
-            platform_specific: window::settings::PlatformSpecific {
-                application_id: String::from("cfait"),
-                ..Default::default()
-            },
+    iced::application(
+        "Cfait | 🗹 Take control of your TODO list",
+        GuiApp::update,
+        GuiApp::view,
+    )
+    .theme(GuiApp::theme)
+    .window(window::Settings {
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: String::from("cfait"),
             ..Default::default()
-        })
-        .run_with(GuiApp::new)
+        },
+        ..Default::default()
+    })
+    .run_with(GuiApp::new)
 }
 
 impl GuiApp {

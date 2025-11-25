@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Cfait
-Comment=Elegant CalDAV Task Manager
+Comment=🗹 Take control of your TODO list
 Exec=cfait-gui
 Terminal=false
 Type=Application
