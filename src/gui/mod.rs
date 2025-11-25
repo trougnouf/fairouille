@@ -306,24 +306,24 @@ impl GuiApp {
                             }
                         }
 
-                        if let Some(cal_href) = target_cal {
-                            if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                                let task = &mut tasks[target_idx];
-                                task.apply_smart_input(&self.input_value, &self.tag_aliases);
-                                task.description = self.description_value.clone();
+                        if let Some(cal_href) = target_cal
+                            && let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                        {
+                            let task = &mut tasks[target_idx];
+                            task.apply_smart_input(&self.input_value, &self.tag_aliases);
+                            task.description = self.description_value.clone();
 
-                                let task_copy = task.clone();
-                                self.input_value.clear();
-                                self.description_value.clear();
-                                self.editing_uid = None;
-                                self.refresh_filtered_tasks();
+                            let task_copy = task.clone();
+                            self.input_value.clear();
+                            self.description_value.clear();
+                            self.editing_uid = None;
+                            self.refresh_filtered_tasks();
 
-                                if let Some(client) = &self.client {
-                                    return Task::perform(
-                                        async_update_wrapper(client.clone(), task_copy),
-                                        Message::SyncSaved,
-                                    );
-                                }
+                            if let Some(client) = &self.client {
+                                return Task::perform(
+                                    async_update_wrapper(client.clone(), task_copy),
+                                    Message::SyncSaved,
+                                );
                             }
                         }
                     } else {
@@ -366,20 +366,20 @@ impl GuiApp {
                     let uid = view_task.uid.clone();
                     let cal_href = view_task.calendar_href.clone();
 
-                    if let Some(cal_tasks) = self.store.calendars.get_mut(&cal_href) {
-                        if let Some(t) = cal_tasks.iter_mut().find(|t| t.uid == uid) {
-                            t.completed = !t.completed;
-                            let mut server_task = t.clone();
-                            server_task.completed = !server_task.completed; // Revert for API call
+                    if let Some(cal_tasks) = self.store.calendars.get_mut(&cal_href)
+                        && let Some(t) = cal_tasks.iter_mut().find(|t| t.uid == uid)
+                    {
+                        t.completed = !t.completed;
+                        let mut server_task = t.clone();
+                        server_task.completed = !server_task.completed; // Revert for API call
 
-                            self.refresh_filtered_tasks();
+                        self.refresh_filtered_tasks();
 
-                            if let Some(client) = &self.client {
-                                return Task::perform(
-                                    async_toggle_wrapper(client.clone(), server_task),
-                                    Message::SyncToggleComplete,
-                                );
-                            }
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_toggle_wrapper(client.clone(), server_task),
+                                |res| Message::SyncToggleComplete(Box::new(res)),
+                            );
                         }
                     }
                 }
@@ -424,11 +424,11 @@ impl GuiApp {
             }
 
             Message::SyncSaved(Ok(updated)) => {
-                if let Some(tasks) = self.store.calendars.get_mut(&updated.calendar_href) {
-                    if let Some(idx) = tasks.iter().position(|t| t.uid == updated.uid) {
-                        tasks[idx] = updated.clone();
-                        let _ = Cache::save(&updated.calendar_href, tasks);
-                    }
+                if let Some(tasks) = self.store.calendars.get_mut(&updated.calendar_href)
+                    && let Some(idx) = tasks.iter().position(|t| t.uid == updated.uid)
+                {
+                    tasks[idx] = updated.clone();
+                    let _ = Cache::save(&updated.calendar_href, tasks);
                 }
                 self.refresh_filtered_tasks();
                 Task::none()
@@ -437,23 +437,25 @@ impl GuiApp {
                 self.error_msg = Some(format!("Sync Error: {}", e));
                 Task::none()
             }
-            Message::SyncToggleComplete(Ok((updated, created_opt))) => {
-                if let Some(tasks) = self.store.calendars.get_mut(&updated.calendar_href) {
-                    if let Some(idx) = tasks.iter().position(|t| t.uid == updated.uid) {
-                        tasks[idx] = updated.clone();
+            Message::SyncToggleComplete(boxed_res) => match *boxed_res {
+                Ok((updated, created_opt)) => {
+                    if let Some(tasks) = self.store.calendars.get_mut(&updated.calendar_href) {
+                        if let Some(idx) = tasks.iter().position(|t| t.uid == updated.uid) {
+                            tasks[idx] = updated.clone();
+                        }
+                        if let Some(created) = created_opt {
+                            tasks.push(created);
+                        }
+                        let _ = Cache::save(&updated.calendar_href, tasks);
                     }
-                    if let Some(created) = created_opt {
-                        tasks.push(created);
-                    }
-                    let _ = Cache::save(&updated.calendar_href, tasks);
+                    self.refresh_filtered_tasks();
+                    Task::none()
                 }
-                self.refresh_filtered_tasks();
-                Task::none()
-            }
-            Message::SyncToggleComplete(Err(e)) => {
-                self.error_msg = Some(format!("Toggle Error: {}", e));
-                Task::none()
-            }
+                Err(e) => {
+                    self.error_msg = Some(format!("Toggle Error: {}", e));
+                    Task::none()
+                }
+            },
             Message::EditTaskStart(index) => {
                 if let Some(task) = self.tasks.get(index) {
                     self.input_value = task.to_smart_string();
@@ -490,34 +492,34 @@ impl GuiApp {
                     let uid = view_task.uid.clone();
                     let cal_href = view_task.calendar_href.clone();
 
-                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                        if let Some(t) = tasks.iter_mut().find(|t| t.uid == uid) {
-                            let new_prio = if delta > 0 {
-                                match t.priority {
-                                    0 => 9,
-                                    9 => 5,
-                                    5 => 1,
-                                    1 => 1,
-                                    _ => 5,
-                                }
-                            } else {
-                                match t.priority {
-                                    1 => 5,
-                                    5 => 9,
-                                    9 => 0,
-                                    0 => 0,
-                                    _ => 0,
-                                }
-                            };
-                            t.priority = new_prio;
-                            let t_clone = t.clone();
-                            self.refresh_filtered_tasks();
-                            if let Some(client) = &self.client {
-                                return Task::perform(
-                                    async_update_wrapper(client.clone(), t_clone),
-                                    Message::SyncSaved,
-                                );
+                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                        && let Some(t) = tasks.iter_mut().find(|t| t.uid == uid)
+                    {
+                        let new_prio = if delta > 0 {
+                            match t.priority {
+                                0 => 9,
+                                9 => 5,
+                                5 => 1,
+                                1 => 1,
+                                _ => 5,
                             }
+                        } else {
+                            match t.priority {
+                                1 => 5,
+                                5 => 9,
+                                9 => 0,
+                                0 => 0,
+                                _ => 0,
+                            }
+                        };
+                        t.priority = new_prio;
+                        let t_clone = t.clone();
+                        self.refresh_filtered_tasks();
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), t_clone),
+                                Message::SyncSaved,
+                            );
                         }
                     }
                 }
@@ -529,17 +531,17 @@ impl GuiApp {
                     let current_uid = self.tasks[index].uid.clone();
                     let cal_href = self.tasks[index].calendar_href.clone();
 
-                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                        if let Some(t) = tasks.iter_mut().find(|t| t.uid == current_uid) {
-                            t.parent_uid = Some(parent_uid);
-                            let t_clone = t.clone();
-                            self.refresh_filtered_tasks();
-                            if let Some(client) = &self.client {
-                                return Task::perform(
-                                    async_update_wrapper(client.clone(), t_clone),
-                                    Message::SyncSaved,
-                                );
-                            }
+                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                        && let Some(t) = tasks.iter_mut().find(|t| t.uid == current_uid)
+                    {
+                        t.parent_uid = Some(parent_uid);
+                        let t_clone = t.clone();
+                        self.refresh_filtered_tasks();
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), t_clone),
+                                Message::SyncSaved,
+                            );
                         }
                     }
                 }
@@ -549,17 +551,17 @@ impl GuiApp {
                 if let Some(view_task) = self.tasks.get(index) {
                     let uid = view_task.uid.clone();
                     let cal_href = view_task.calendar_href.clone();
-                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                        if let Some(t) = tasks.iter_mut().find(|t| t.uid == uid) {
-                            t.parent_uid = None;
-                            let t_clone = t.clone();
-                            self.refresh_filtered_tasks();
-                            if let Some(client) = &self.client {
-                                return Task::perform(
-                                    async_update_wrapper(client.clone(), t_clone),
-                                    Message::SyncSaved,
-                                );
-                            }
+                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                        && let Some(t) = tasks.iter_mut().find(|t| t.uid == uid)
+                    {
+                        t.parent_uid = None;
+                        let t_clone = t.clone();
+                        self.refresh_filtered_tasks();
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), t_clone),
+                                Message::SyncSaved,
+                            );
                         }
                     }
                 }
@@ -601,25 +603,23 @@ impl GuiApp {
                         }
                     }
 
-                    if let Some(cal_href) = target_cal {
-                        if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                            let task = &mut tasks[target_idx];
+                    if let Some(cal_href) = target_cal
+                        && let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                    {
+                        let task = &mut tasks[target_idx];
 
-                            // Prevent self-parenting or redundancy
-                            if task.uid != *parent_uid
-                                && task.parent_uid.as_ref() != Some(parent_uid)
-                            {
-                                task.parent_uid = Some(parent_uid.clone());
+                        // Prevent self-parenting or redundancy
+                        if task.uid != *parent_uid && task.parent_uid.as_ref() != Some(parent_uid) {
+                            task.parent_uid = Some(parent_uid.clone());
 
-                                let task_copy = task.clone();
-                                self.refresh_filtered_tasks(); // Refresh UI tree immediately
+                            let task_copy = task.clone();
+                            self.refresh_filtered_tasks(); // Refresh UI tree immediately
 
-                                if let Some(client) = &self.client {
-                                    return Task::perform(
-                                        async_update_wrapper(client.clone(), task_copy),
-                                        Message::SyncSaved,
-                                    );
-                                }
+                            if let Some(client) = &self.client {
+                                return Task::perform(
+                                    async_update_wrapper(client.clone(), task_copy),
+                                    Message::SyncSaved,
+                                );
                             }
                         }
                     }
@@ -645,25 +645,24 @@ impl GuiApp {
                         }
                     }
 
-                    if let Some(cal_href) = target_cal {
-                        if let Some(tasks) = self.store.calendars.get_mut(&cal_href) {
-                            let task = &mut tasks[target_idx];
+                    if let Some(cal_href) = target_cal
+                        && let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                    {
+                        let task = &mut tasks[target_idx];
 
-                            // 2. Check if already exists or self-ref
-                            if task.uid != *blocker_uid && !task.dependencies.contains(blocker_uid)
-                            {
-                                task.dependencies.push(blocker_uid.clone());
+                        // 2. Check if already exists or self-ref
+                        if task.uid != *blocker_uid && !task.dependencies.contains(blocker_uid) {
+                            task.dependencies.push(blocker_uid.clone());
 
-                                // 3. Save & Refresh
-                                let task_copy = task.clone();
-                                self.refresh_filtered_tasks();
+                            // 3. Save & Refresh
+                            let task_copy = task.clone();
+                            self.refresh_filtered_tasks();
 
-                                if let Some(client) = &self.client {
-                                    return Task::perform(
-                                        async_update_wrapper(client.clone(), task_copy),
-                                        Message::SyncSaved,
-                                    );
-                                }
+                            if let Some(client) = &self.client {
+                                return Task::perform(
+                                    async_update_wrapper(client.clone(), task_copy),
+                                    Message::SyncSaved,
+                                );
                             }
                         }
                     }
@@ -762,15 +761,11 @@ async fn connect_and_fetch(
             .find(|c| c.name == *def_cal || c.href == *def_cal)
         {
             active_href = Some(found.href.clone());
-        } else {
-            if let Ok(href) = client.discover_calendar().await {
-                active_href = Some(href);
-            }
-        }
-    } else {
-        if let Ok(href) = client.discover_calendar().await {
+        } else if let Ok(href) = client.discover_calendar().await {
             active_href = Some(href);
         }
+    } else if let Ok(href) = client.discover_calendar().await {
+        active_href = Some(href);
     }
 
     let tasks = if let Some(ref h) = active_href {

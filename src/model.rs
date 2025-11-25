@@ -38,13 +38,15 @@ impl Task {
         while let Some(word) = tokens.next() {
             if word.starts_with('!')
                 && let Ok(p) = word[1..].parse::<u8>()
-                    && (1..=9).contains(&p) {
-                        self.priority = p;
-                        continue;
-                    }
+                && (1..=9).contains(&p)
+            {
+                self.priority = p;
+                continue;
+            }
 
-            if word.starts_with('#') {
-                let cat = word[1..].to_string();
+            // 2. Categories (#tag)
+            if let Some(stripped) = word.strip_prefix('#') {
+                let cat = stripped.to_string();
                 if !cat.is_empty() {
                     if !self.categories.contains(&cat) {
                         self.categories.push(cat.clone());
@@ -79,45 +81,48 @@ impl Task {
 
             if word == "@every" {
                 if let Some(next_token) = tokens.peek()
-                    && let Ok(interval) = next_token.parse::<u32>() {
-                        tokens.next();
-                        if let Some(unit_token) = tokens.peek() {
-                            let unit = unit_token.to_lowercase();
-                            let freq = if unit.starts_with("day") {
-                                "DAILY"
-                            } else if unit.starts_with("week") {
-                                "WEEKLY"
-                            } else if unit.starts_with("month") {
-                                "MONTHLY"
-                            } else if unit.starts_with("year") {
-                                "YEARLY"
-                            } else {
-                                ""
-                            };
+                    && let Ok(interval) = next_token.parse::<u32>()
+                {
+                    tokens.next();
+                    if let Some(unit_token) = tokens.peek() {
+                        let unit = unit_token.to_lowercase();
+                        let freq = if unit.starts_with("day") {
+                            "DAILY"
+                        } else if unit.starts_with("week") {
+                            "WEEKLY"
+                        } else if unit.starts_with("month") {
+                            "MONTHLY"
+                        } else if unit.starts_with("year") {
+                            "YEARLY"
+                        } else {
+                            ""
+                        };
 
-                            if !freq.is_empty() {
-                                tokens.next();
-                                self.rrule = Some(format!("FREQ={};INTERVAL={}", freq, interval));
-                                continue;
-                            }
+                        if !freq.is_empty() {
+                            tokens.next();
+                            self.rrule = Some(format!("FREQ={};INTERVAL={}", freq, interval));
+                            continue;
                         }
                     }
+                }
                 summary_words.push(word);
                 continue;
             }
 
             if let Some(val) = word.strip_prefix('@') {
                 if let Ok(date) = NaiveDate::parse_from_str(val, "%Y-%m-%d")
-                    && let Some(dt) = date.and_hms_opt(23, 59, 59) {
-                        self.due = Some(dt.and_utc());
-                        continue;
-                    }
+                    && let Some(dt) = date.and_hms_opt(23, 59, 59)
+                {
+                    self.due = Some(dt.and_utc());
+                    continue;
+                }
                 let now = Local::now().date_naive();
                 if val == "today"
-                    && let Some(dt) = now.and_hms_opt(23, 59, 59) {
-                        self.due = Some(dt.and_utc());
-                        continue;
-                    }
+                    && let Some(dt) = now.and_hms_opt(23, 59, 59)
+                {
+                    self.due = Some(dt.and_utc());
+                    continue;
+                }
                 if val == "tomorrow" {
                     let d = now + chrono::Duration::days(1);
                     if let Some(dt) = d.and_hms_opt(23, 59, 59) {
@@ -126,26 +131,27 @@ impl Task {
                     }
                 }
                 if val == "next"
-                    && let Some(unit_token) = tokens.peek() {
-                        let unit = unit_token.to_lowercase();
-                        let mut offset = 0;
-                        if unit.starts_with("week") {
-                            offset = 7;
-                        } else if unit.starts_with("month") {
-                            offset = 30;
-                        } else if unit.starts_with("year") {
-                            offset = 365;
-                        }
+                    && let Some(unit_token) = tokens.peek()
+                {
+                    let unit = unit_token.to_lowercase();
+                    let mut offset = 0;
+                    if unit.starts_with("week") {
+                        offset = 7;
+                    } else if unit.starts_with("month") {
+                        offset = 30;
+                    } else if unit.starts_with("year") {
+                        offset = 365;
+                    }
 
-                        if offset > 0 {
-                            tokens.next();
-                            let d = now + chrono::Duration::days(offset);
-                            if let Some(dt) = d.and_hms_opt(23, 59, 59) {
-                                self.due = Some(dt.and_utc());
-                                continue;
-                            }
+                    if offset > 0 {
+                        tokens.next();
+                        let d = now + chrono::Duration::days(offset);
+                        if let Some(dt) = d.and_hms_opt(23, 59, 59) {
+                            self.due = Some(dt.and_utc());
+                            continue;
                         }
                     }
+                }
             }
             summary_words.push(word);
         }
@@ -416,21 +422,20 @@ impl Task {
 
         for line in unfolded.lines() {
             if line.starts_with("RELATED-TO")
-                && let Some((key_part, value)) = line.split_once(':') {
-                    let value = value.trim().to_string();
-                    let key_upper = key_part.to_uppercase();
+                && let Some((key_part, value)) = line.split_once(':')
+            {
+                let value = value.trim().to_string();
+                let key_upper = key_part.to_uppercase();
 
-                    if key_upper.contains("RELTYPE=DEPENDS-ON") {
-                        if !dependencies.contains(&value) {
-                            dependencies.push(value);
-                        }
-                    } else if !key_upper.contains("RELTYPE=")
-                        || key_upper.contains("RELTYPE=PARENT")
-                    {
-                        // Only set parent if not already found (or overwrite if multiple? RFC says 1 parent)
-                        parent_uid = Some(value);
+                if key_upper.contains("RELTYPE=DEPENDS-ON") {
+                    if !dependencies.contains(&value) {
+                        dependencies.push(value);
                     }
+                } else if !key_upper.contains("RELTYPE=") || key_upper.contains("RELTYPE=PARENT") {
+                    // Only set parent if not already found (or overwrite if multiple? RFC says 1 parent)
+                    parent_uid = Some(value);
                 }
+            }
         }
 
         Ok(Task {
