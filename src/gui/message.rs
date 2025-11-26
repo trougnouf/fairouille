@@ -31,8 +31,6 @@ pub enum Message {
     EditTaskStart(usize),
     CancelEdit,
     ChangePriority(usize, i8),
-    IndentTask(usize),
-    OutdentTask(usize),
     ToggleDetails(String),
     ConfigLoaded(Result<Config, String>),
     ObSortMonthsChanged(String),

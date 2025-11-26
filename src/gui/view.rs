@@ -434,18 +434,6 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             .on_press(Message::ChangePriority(index, -1)),
     );
     actions = actions.push(
-        button(text(">").size(14))
-            .style(btn_style)
-            .padding(5)
-            .on_press(Message::IndentTask(index)),
-    );
-    actions = actions.push(
-        button(text("<").size(14))
-            .style(btn_style)
-            .padding(5)
-            .on_press(Message::OutdentTask(index)),
-    );
-    actions = actions.push(
         button(text("Edit").size(14))
             .style(btn_style)
             .padding(5)

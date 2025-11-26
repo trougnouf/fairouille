@@ -565,48 +565,6 @@ impl GuiApp {
                 }
                 Task::none()
             }
-            Message::IndentTask(index) => {
-                if index > 0 && index < self.tasks.len() {
-                    let parent_uid = self.tasks[index - 1].uid.clone();
-                    let current_uid = self.tasks[index].uid.clone();
-                    let cal_href = self.tasks[index].calendar_href.clone();
-
-                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href)
-                        && let Some(t) = tasks.iter_mut().find(|t| t.uid == current_uid)
-                    {
-                        t.parent_uid = Some(parent_uid);
-                        let t_clone = t.clone();
-                        self.refresh_filtered_tasks();
-                        if let Some(client) = &self.client {
-                            return Task::perform(
-                                async_update_wrapper(client.clone(), t_clone),
-                                Message::SyncSaved,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::OutdentTask(index) => {
-                if let Some(view_task) = self.tasks.get(index) {
-                    let uid = view_task.uid.clone();
-                    let cal_href = view_task.calendar_href.clone();
-                    if let Some(tasks) = self.store.calendars.get_mut(&cal_href)
-                        && let Some(t) = tasks.iter_mut().find(|t| t.uid == uid)
-                    {
-                        t.parent_uid = None;
-                        let t_clone = t.clone();
-                        self.refresh_filtered_tasks();
-                        if let Some(client) = &self.client {
-                            return Task::perform(
-                                async_update_wrapper(client.clone(), t_clone),
-                                Message::SyncSaved,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
             Message::ToggleDetails(uid) => {
                 if self.expanded_tasks.contains(&uid) {
                     self.expanded_tasks.remove(&uid);
