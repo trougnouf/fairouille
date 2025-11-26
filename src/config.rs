@@ -9,7 +9,7 @@ fn default_true() -> bool {
     true
 }
 
-// NEW: Default to 6 months
+// Default to 6 months
 fn default_cutoff() -> Option<u32> {
     Some(6)
 }
@@ -24,7 +24,7 @@ pub struct Config {
     #[serde(default)]
     pub hide_completed: bool,
     #[serde(default = "default_true")]
-    pub hide_completed_in_tags: bool,
+    pub hide_fully_completed_tags: bool,
 
     #[serde(default = "default_cutoff")]
     pub sort_cutoff_months: Option<u32>,

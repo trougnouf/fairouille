@@ -123,11 +123,12 @@ fn view_sidebar_calendars(app: &GuiApp) -> Element<'_, Message> {
 }
 
 fn view_sidebar_categories(app: &GuiApp) -> Element<'_, Message> {
-    let should_hide = app.hide_completed || app.hide_completed_in_tags;
-
-    let all_cats = app
-        .store
-        .get_all_categories(should_hide, &app.selected_categories);
+    // Pass both flags to get_all_categories
+    let all_cats = app.store.get_all_categories(
+        app.hide_completed,
+        app.hide_fully_completed_tags,
+        &app.selected_categories,
+    );
 
     let logic_text = if app.match_all_categories {
         "Match: AND"
@@ -553,22 +554,31 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         horizontal_space().width(0).into()
     };
 
-    let prefs: Element<_> = if is_settings {
-        container(
+    let prefs: Element<'_, Message> = if is_settings {
+        std::convert::Into::<Element<'_, Message>>::into(container(
             column![
-                checkbox("Hide Completed Tasks (Everywhere)", app.hide_completed)
-                    .on_toggle(Message::ToggleHideCompleted),
-                checkbox(
-                    "Hide Completed Tasks (in Tags view)",
-                    app.hide_completed_in_tags
-                )
-                .on_toggle(Message::ToggleHideCompletedInTags),
+                std::convert::Into::<Element<'_, Message>>::into(
+                    checkbox("Hide Completed Tasks (Everywhere)", app.hide_completed)
+                        .on_toggle(Message::ToggleHideCompleted),
+                ),
+                // Conditional checkbox: only visible when 'Hide Completed Tasks (Everywhere)' is off
+                if !app.hide_completed {
+                    std::convert::Into::<Element<'_, Message>>::into(
+                        checkbox(
+                            "Hide Tags containing ONLY completed tasks",
+                            app.hide_fully_completed_tags,
+                        )
+                        .on_toggle(Message::ToggleHideFullyCompletedTags),
+                    )
+                } else {
+                    // Placeholder to keep spacing
+                    std::convert::Into::<Element<'_, Message>>::into(horizontal_space().width(0))
+                },
             ]
             .spacing(10),
-        )
-        .into()
+        ))
     } else {
-        horizontal_space().width(0).into()
+        std::convert::Into::<Element<'_, Message>>::into(horizontal_space().width(0))
     };
 
     let sorting_ui: Element<_> = if is_settings {
@@ -588,7 +598,7 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         horizontal_space().width(0).into()
     };
 
-    // NEW: Alias Section
+    // Alias Section
     let aliases_ui: Element<_> = if is_settings {
         let mut list_col = column![text("Tag Aliases").size(20)].spacing(10);
 

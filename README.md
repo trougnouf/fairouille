@@ -5,11 +5,11 @@
 
 It features both a lightning-fast **TUI (Terminal UI)** and a modern **GUI (Graphical UI)** for desktop integration.
 
-![Cfait GUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.1.7_screenshot_(GUI).png)
-*The Graphical Interface in v0.1.7*
+![Cfait GUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.1.9_screenshot_(GUI).png)
+> The Graphical Interface in v0.1.9
 
-![Cfait TUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.1.7_screenshot_(TUI).png)
-*The Terminal Interface in v0.1.7*
+![Cfait TUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.1.9_screenshot_(TUI).png)
+> The Terminal Interface in v0.1.9
 
 ## Features
 
@@ -64,8 +64,9 @@ default_calendar = "Personal" # Optional: Auto-selects this list on startup
 
 # Hide completed tasks in all views
 hide_completed = false
-# Hide completed tasks only when viewing Tags/Categories
-hide_completed_in_tags = true
+# Hide tags from the sidebar if they contain NO active tasks
+# When true, tags that have only completed tasks will be hidden from the Tags view
+hide_fully_completed_tags = true
 
 # Tag Aliases: Automatically expand one tag into multiple
 [tag_aliases]

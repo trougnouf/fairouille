@@ -53,7 +53,7 @@ pub enum Message {
     RefreshedAll(Result<Vec<(String, Vec<TodoTask>)>, String>),
 
     ToggleHideCompleted(bool),
-    ToggleHideCompletedInTags(bool),
+    ToggleHideFullyCompletedTags(bool),
 
     YankTask(String),
     ClearYank,

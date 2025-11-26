@@ -67,9 +67,9 @@ impl GuiApp {
             password: self.ob_pass.clone(),
             default_calendar: self.ob_default_cal.clone(),
             hide_completed: self.hide_completed,
-            hide_completed_in_tags: self.hide_completed_in_tags,
+            hide_fully_completed_tags: self.hide_fully_completed_tags,
             tag_aliases: self.tag_aliases.clone(),
-            sort_cutoff_months: self.sort_cutoff_months, // NEW
+            sort_cutoff_months: self.sort_cutoff_months,
         }
         .save();
     }
@@ -97,7 +97,6 @@ impl GuiApp {
             match_all_categories: self.match_all_categories,
             search_term: &self.search_value,
             hide_completed_global: self.hide_completed,
-            hide_completed_in_tags: self.hide_completed_in_tags,
             cutoff_date,
         });
     }
@@ -152,9 +151,9 @@ impl GuiApp {
                     password: self.ob_pass.clone(),
                     default_calendar: self.ob_default_cal.clone(),
                     hide_completed: self.hide_completed,
-                    hide_completed_in_tags: self.hide_completed_in_tags,
+                    hide_fully_completed_tags: self.hide_fully_completed_tags,
                     tag_aliases: self.tag_aliases.clone(),
-                    sort_cutoff_months: self.sort_cutoff_months, // NEW
+                    sort_cutoff_months: self.sort_cutoff_months,
                 };
                 Task::perform(connect_and_fetch_wrapper(config), Message::Loaded)
             }
@@ -167,7 +166,7 @@ impl GuiApp {
                     self.ob_pass = cfg.password;
                     self.ob_default_cal = cfg.default_calendar;
                     self.hide_completed = cfg.hide_completed;
-                    self.hide_completed_in_tags = cfg.hide_completed_in_tags;
+                    self.hide_fully_completed_tags = cfg.hide_fully_completed_tags;
                     self.tag_aliases = cfg.tag_aliases; // Load Map
                     self.sort_cutoff_months = cfg.sort_cutoff_months;
                     self.ob_sort_months_input = match cfg.sort_cutoff_months {
@@ -190,7 +189,7 @@ impl GuiApp {
                 // Load config defaults if we haven't already
                 if let Ok(cfg) = Config::load() {
                     self.hide_completed = cfg.hide_completed;
-                    self.hide_completed_in_tags = cfg.hide_completed_in_tags;
+                    self.hide_fully_completed_tags = cfg.hide_fully_completed_tags;
                     self.tag_aliases = cfg.tag_aliases; // Load Map
                 }
 
@@ -210,9 +209,9 @@ impl GuiApp {
                         password: self.ob_pass.clone(),
                         default_calendar: self.ob_default_cal.clone(),
                         hide_completed: self.hide_completed,
-                        hide_completed_in_tags: self.hide_completed_in_tags,
+                        hide_fully_completed_tags: self.hide_fully_completed_tags,
                         tag_aliases: self.tag_aliases.clone(),
-                        sort_cutoff_months: self.sort_cutoff_months, // NEW
+                        sort_cutoff_months: self.sort_cutoff_months,
                     }
                     .save();
                 }
@@ -286,8 +285,8 @@ impl GuiApp {
                 self.refresh_filtered_tasks();
                 Task::none()
             }
-            Message::ToggleHideCompletedInTags(val) => {
-                self.hide_completed_in_tags = val;
+            Message::ToggleHideFullyCompletedTags(val) => {
+                self.hide_fully_completed_tags = val;
                 self.save_config(); // <--- PERSIST TO DISK
                 self.refresh_filtered_tasks();
                 Task::none()
@@ -578,13 +577,11 @@ impl GuiApp {
                 Task::none()
             }
 
-            // NEW: Clear the clipboard
             Message::ClearYank => {
                 self.yanked_uid = None;
                 Task::none()
             }
 
-            // NEW: Set Parent (Make Child)
             Message::MakeChild(target_uid) => {
                 if let Some(parent_uid) = &self.yanked_uid {
                     // Standard find-and-update logic

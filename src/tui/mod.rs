@@ -44,23 +44,31 @@ pub async fn run() -> Result<()> {
 
     // Load Config
     let config_result = config::Config::load();
-    let (url, user, pass, default_cal, hide_completed, hide_in_tags, tag_aliases, sort_cutoff) =
-        match config_result {
-            Ok(cfg) => (
-                cfg.url,
-                cfg.username,
-                cfg.password,
-                cfg.default_calendar,
-                cfg.hide_completed,
-                cfg.hide_completed_in_tags,
-                cfg.tag_aliases,
-                cfg.sort_cutoff_months, // NEW
-            ),
-            Err(_) => {
-                eprintln!("Config not found. Please run 'cfait-gui' to set up credentials.");
-                return Ok(());
-            }
-        };
+    let (
+        url,
+        user,
+        pass,
+        default_cal,
+        hide_completed,
+        hide_fully_completed_tags,
+        tag_aliases,
+        sort_cutoff,
+    ) = match config_result {
+        Ok(cfg) => (
+            cfg.url,
+            cfg.username,
+            cfg.password,
+            cfg.default_calendar,
+            cfg.hide_completed,
+            cfg.hide_fully_completed_tags,
+            cfg.tag_aliases,
+            cfg.sort_cutoff_months,
+        ),
+        Err(_) => {
+            eprintln!("Config not found. Please run 'cfait-gui' to set up credentials.");
+            return Ok(());
+        }
+    };
 
     // --- 2. TERMINAL SETUP ---
     enable_raw_mode()?;
@@ -72,7 +80,7 @@ pub async fn run() -> Result<()> {
     // --- 3. STATE INIT ---
     let mut app_state = AppState::new();
     app_state.hide_completed = hide_completed;
-    app_state.hide_completed_in_tags = hide_in_tags;
+    app_state.hide_fully_completed_tags = hide_fully_completed_tags;
     app_state.tag_aliases = tag_aliases;
     app_state.sort_cutoff_months = sort_cutoff;
 
@@ -474,11 +482,9 @@ pub async fn run() -> Result<()> {
                                         }
                                     }
                                     SidebarMode::Categories => {
-                                        let should_hide = app_state.hide_completed
-                                            || app_state.hide_completed_in_tags;
-
                                         let cats = app_state.store.get_all_categories(
-                                            should_hide,
+                                            app_state.hide_completed,
+                                            app_state.hide_fully_completed_tags,
                                             &app_state.selected_categories,
                                         );
 

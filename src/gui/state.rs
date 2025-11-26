@@ -27,7 +27,6 @@ pub struct GuiApp {
     pub tasks: Vec<TodoTask>,
     pub calendars: Vec<CalendarListEntry>,
     pub client: Option<RustyClient>,
-    // NEW: Alias Map
     pub tag_aliases: HashMap<String, Vec<String>>,
 
     // UI State
@@ -39,7 +38,7 @@ pub struct GuiApp {
 
     // Preferences
     pub hide_completed: bool,
-    pub hide_completed_in_tags: bool,
+    pub hide_fully_completed_tags: bool,
     pub sort_cutoff_months: Option<u32>,
 
     // Inputs - Main
@@ -73,7 +72,7 @@ impl Default for GuiApp {
             tasks: vec![],
             calendars: vec![],
             client: None,
-            tag_aliases: HashMap::new(), // NEW
+            tag_aliases: HashMap::new(),
 
             sidebar_mode: SidebarMode::Calendars,
             active_cal_href: None,
@@ -82,7 +81,7 @@ impl Default for GuiApp {
             yanked_uid: None,
 
             hide_completed: false,
-            hide_completed_in_tags: true,
+            hide_fully_completed_tags: true,
             sort_cutoff_months: Some(6),
             ob_sort_months_input: "6".to_string(),
 
@@ -92,8 +91,8 @@ impl Default for GuiApp {
             editing_uid: None,
             expanded_tasks: HashSet::new(),
 
-            alias_input_key: String::new(),    // NEW
-            alias_input_values: String::new(), // NEW
+            alias_input_key: String::new(),
+            alias_input_values: String::new(),
 
             loading: true,
             error_msg: None,

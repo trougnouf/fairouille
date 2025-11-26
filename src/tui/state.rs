@@ -39,7 +39,7 @@ pub struct AppState {
     pub selected_categories: HashSet<String>,
     pub match_all_categories: bool,
     pub hide_completed: bool,
-    pub hide_completed_in_tags: bool,
+    pub hide_fully_completed_tags: bool,
     pub sort_cutoff_months: Option<u32>,
 
     // Input Buffers
@@ -80,7 +80,7 @@ impl AppState {
             selected_categories: HashSet::new(),
             match_all_categories: false,
             hide_completed: false,
-            hide_completed_in_tags: true,
+            hide_fully_completed_tags: false,
             sort_cutoff_months: Some(6),
 
             input_buffer: String::new(),
@@ -118,7 +118,6 @@ impl AppState {
             match_all_categories: self.match_all_categories,
             search_term,
             hide_completed_global: self.hide_completed,
-            hide_completed_in_tags: self.hide_completed_in_tags,
             cutoff_date,
         });
 
@@ -196,12 +195,14 @@ impl AppState {
                 // FIX: Pass visibility args to get correct length
                 let len = match self.sidebar_mode {
                     SidebarMode::Calendars => self.calendars.len(),
-                    SidebarMode::Categories => {
-                        let should_hide = self.hide_completed || self.hide_completed_in_tags;
-                        self.store
-                            .get_all_categories(should_hide, &self.selected_categories)
-                            .len()
-                    }
+                    SidebarMode::Categories => self
+                        .store
+                        .get_all_categories(
+                            self.hide_completed,
+                            self.hide_fully_completed_tags,
+                            &self.selected_categories,
+                        )
+                        .len(),
                 };
                 if len == 0 {
                     return;
@@ -242,12 +243,14 @@ impl AppState {
                 // FIX: Pass visibility args to get correct length
                 let len = match self.sidebar_mode {
                     SidebarMode::Calendars => self.calendars.len(),
-                    SidebarMode::Categories => {
-                        let should_hide = self.hide_completed || self.hide_completed_in_tags;
-                        self.store
-                            .get_all_categories(should_hide, &self.selected_categories)
-                            .len()
-                    }
+                    SidebarMode::Categories => self
+                        .store
+                        .get_all_categories(
+                            self.hide_completed,
+                            self.hide_fully_completed_tags,
+                            &self.selected_categories,
+                        )
+                        .len(),
                 };
                 if len == 0 {
                     return;

@@ -16,7 +16,6 @@ pub struct FilterOptions<'a> {
     pub match_all_categories: bool,
     pub search_term: &'a str,
     pub hide_completed_global: bool,
-    pub hide_completed_in_tags: bool,
     pub cutoff_date: Option<DateTime<Utc>>,
 }
 
@@ -36,14 +35,22 @@ impl TaskStore {
     pub fn get_all_categories(
         &self,
         hide_completed: bool,
-        forced_includes: &HashSet<String>, // Fix for vanishing selected tags
+        hide_fully_completed_tags: bool,
+        forced_includes: &HashSet<String>,
     ) -> Vec<String> {
         let mut set = HashSet::new();
         let mut has_uncategorized = false;
 
         for tasks in self.calendars.values() {
             for task in tasks {
+                // 1. If global hide is on, completed tasks never contribute to tags
                 if hide_completed && task.completed {
+                    continue;
+                }
+
+                // 2. If we aren't hiding globally, but we want to hide tags that are ONLY
+                //    on completed tasks, we ignore completed tasks for the purpose of the list generation.
+                if !hide_completed && hide_fully_completed_tags && task.completed {
                     continue;
                 }
 
@@ -57,9 +64,8 @@ impl TaskStore {
             }
         }
 
-        // 1. Ensure selected tags remain visible (Fixes the bug)
+        // Ensure selected tags remain visible
         for included in forced_includes {
-            // Don't add the special ID here, we handle it below
             if included != UNCATEGORIZED_ID {
                 set.insert(included.clone());
             }
@@ -68,8 +74,6 @@ impl TaskStore {
         let mut list: Vec<String> = set.into_iter().collect();
         list.sort();
 
-        // 2. Append "Uncategorized" at the end if needed
-        // It shows if we found uncategorized tasks OR if it is currently selected
         if has_uncategorized || forced_includes.contains(UNCATEGORIZED_ID) {
             list.push(UNCATEGORIZED_ID.to_string());
         }
@@ -79,7 +83,6 @@ impl TaskStore {
 
     pub fn filter(&self, options: FilterOptions) -> Vec<Task> {
         let mut raw_tasks = Vec::new();
-        let is_category_mode = options.active_cal_href.is_none();
 
         if let Some(href) = options.active_cal_href {
             if let Some(tasks) = self.calendars.get(href) {
@@ -94,14 +97,10 @@ impl TaskStore {
         let filtered: Vec<Task> = raw_tasks
             .into_iter()
             .filter(|t| {
-                if t.completed {
-                    if options.hide_completed_global {
-                        return false;
-                    }
-                    if is_category_mode && options.hide_completed_in_tags {
-                        return false;
-                    }
+                if t.completed && options.hide_completed_global {
+                    return false;
                 }
+                // Removed the old 'hide_completed_in_tags' check logic
 
                 if !options.selected_categories.is_empty() {
                     let filter_uncategorized =
@@ -220,7 +219,6 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res.len(), 1);
@@ -233,7 +231,6 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res_global.len(), 2);
@@ -260,7 +257,6 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res.len(), 3);
@@ -286,7 +282,6 @@ mod tests {
             match_all_categories: true,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res.len(), 1);
@@ -308,7 +303,6 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res.len(), 2);
@@ -320,7 +314,6 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: true,
-            hide_completed_in_tags: false,
             cutoff_date: None,
         });
         assert_eq!(res_hidden.len(), 1);
@@ -341,22 +334,21 @@ mod tests {
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: true,
             cutoff_date: None,
         });
         assert_eq!(res_cal.len(), 2);
 
-        // Global/Tag View: hide_completed_in_tags SHOULD affect it
+        // Global/Tag View: with the new settings, completed tasks are only hidden
+        // when hide_completed_global is true. So with hide_completed_global=false
+        // we still expect both tasks to be visible.
         let res_global = store.filter(FilterOptions {
             active_cal_href: None,
             selected_categories: &HashSet::new(),
             match_all_categories: false,
             search_term: "",
             hide_completed_global: false,
-            hide_completed_in_tags: true,
             cutoff_date: None,
         });
-        assert_eq!(res_global.len(), 1);
-        assert_eq!(res_global[0].summary, "Active");
+        assert_eq!(res_global.len(), 2);
     }
 }
