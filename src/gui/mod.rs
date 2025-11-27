@@ -653,6 +653,73 @@ impl GuiApp {
                 Task::none()
             }
 
+            Message::RemoveParent(child_uid) => {
+                let mut target_cal = None;
+                let mut target_idx = 0;
+
+                // Find the task
+                'outer_p: for (cal_href, tasks) in &self.store.calendars {
+                    for (i, t) in tasks.iter().enumerate() {
+                        if t.uid == child_uid {
+                            target_cal = Some(cal_href.clone());
+                            target_idx = i;
+                            break 'outer_p;
+                        }
+                    }
+                }
+
+                if let Some(cal_href) = target_cal
+                    && let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                {
+                    let task = &mut tasks[target_idx];
+                    task.parent_uid = None; // Detach
+
+                    let task_copy = task.clone();
+                    self.refresh_filtered_tasks();
+
+                    if let Some(client) = &self.client {
+                        return Task::perform(
+                            async_update_wrapper(client.clone(), task_copy),
+                            Message::SyncSaved,
+                        );
+                    }
+                }
+                Task::none()
+            }
+
+            Message::RemoveDependency(task_uid, dep_uid) => {
+                let mut target_cal = None;
+                let mut target_idx = 0;
+
+                'outer_d: for (cal_href, tasks) in &self.store.calendars {
+                    for (i, t) in tasks.iter().enumerate() {
+                        if t.uid == task_uid {
+                            target_cal = Some(cal_href.clone());
+                            target_idx = i;
+                            break 'outer_d;
+                        }
+                    }
+                }
+
+                if let Some(cal_href) = target_cal
+                    && let Some(tasks) = self.store.calendars.get_mut(&cal_href)
+                {
+                    let task = &mut tasks[target_idx];
+                    task.dependencies.retain(|d| *d != dep_uid); // Remove dependency
+
+                    let task_copy = task.clone();
+                    self.refresh_filtered_tasks();
+
+                    if let Some(client) = &self.client {
+                        return Task::perform(
+                            async_update_wrapper(client.clone(), task_copy),
+                            Message::SyncSaved,
+                        );
+                    }
+                }
+                Task::none()
+            }
+
             Message::AddDependency(target_uid) => {
                 if let Some(blocker_uid) = &self.yanked_uid {
                     // 1. Find target task in store

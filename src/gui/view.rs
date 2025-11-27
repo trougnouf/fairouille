@@ -582,6 +582,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
     if is_expanded {
         let mut details_col = column![].spacing(5);
 
+        // 1. Description
         if !task.description.is_empty() {
             details_col = details_col.push(
                 text(&task.description)
@@ -590,6 +591,28 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             );
         }
 
+        // 2. Parent (NEW: Show parent and allow detaching)
+        if let Some(p_uid) = &task.parent_uid {
+            let p_name = app
+                .store
+                .get_summary(p_uid)
+                .unwrap_or_else(|| "Unknown Parent".to_string());
+            let row = row![
+                text("Parent:")
+                    .size(12)
+                    .color(Color::from_rgb(0.4, 0.8, 0.4)),
+                text(p_name).size(12), // Pass ownership (remove &)
+                button(text("x").size(10))
+                    .style(button::danger)
+                    .padding(2)
+                    .on_press(Message::RemoveParent(task.uid.clone()))
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+            details_col = details_col.push(row);
+        }
+
+        // 3. Dependencies (Updated with remove button)
         if !task.dependencies.is_empty() {
             details_col = details_col.push(
                 text("[Blocked By]:")
@@ -603,11 +626,20 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
                     .unwrap_or_else(|| "Unknown Task".to_string());
                 let is_done = app.store.is_task_done(dep_uid).unwrap_or(false);
                 let check = if is_done { "[x]" } else { "[ ]" };
-                details_col = details_col.push(
-                    text(format!(" {} {}", check, name))
+
+                let dep_row = row![
+                    text(format!("{} {}", check, name))
                         .size(12)
                         .color(Color::from_rgb(0.6, 0.6, 0.6)),
-                );
+                    button(text("x").size(10))
+                        .style(button::danger)
+                        .padding(2)
+                        .on_press(Message::RemoveDependency(task.uid.clone(), dep_uid.clone()))
+                ]
+                .spacing(5)
+                .align_y(iced::Alignment::Center);
+
+                details_col = details_col.push(dep_row);
             }
         }
 
