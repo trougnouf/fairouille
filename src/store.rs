@@ -43,14 +43,13 @@ impl TaskStore {
 
         for tasks in self.calendars.values() {
             for task in tasks {
-                // 1. If global hide is on, completed tasks never contribute to tags
-                if hide_completed && task.completed {
+                let is_done = task.status.is_done();
+
+                if hide_completed && is_done {
                     continue;
                 }
 
-                // 2. If we aren't hiding globally, but we want to hide tags that are ONLY
-                //    on completed tasks, we ignore completed tasks for the purpose of the list generation.
-                if !hide_completed && hide_fully_completed_tags && task.completed {
+                if !hide_completed && hide_fully_completed_tags && is_done {
                     continue;
                 }
 
@@ -97,7 +96,8 @@ impl TaskStore {
         let filtered: Vec<Task> = raw_tasks
             .into_iter()
             .filter(|t| {
-                if t.completed && options.hide_completed_global {
+                // Treat Cancelled same as Completed for hiding purposes
+                if t.status.is_done() && options.hide_completed_global {
                     return false;
                 }
                 // Removed the old 'hide_completed_in_tags' check logic
@@ -150,13 +150,18 @@ impl TaskStore {
         Task::organize_hierarchy(filtered, options.cutoff_date)
     }
 
-    pub fn get_task_status(&self, uid: &str) -> Option<bool> {
+    // Changed return type to check if "Done" (Completed OR Cancelled)
+    pub fn is_task_done(&self, uid: &str) -> Option<bool> {
         for tasks in self.calendars.values() {
             if let Some(t) = tasks.iter().find(|t| t.uid == uid) {
-                return Some(t.completed);
+                return Some(t.status.is_done());
             }
         }
-        None // Task not found (maybe deleted?)
+        None
+    }
+
+    pub fn get_task_status(&self, uid: &str) -> Option<bool> {
+        self.is_task_done(uid)
     }
 
     pub fn is_blocked(&self, task: &Task) -> bool {
@@ -164,10 +169,9 @@ impl TaskStore {
             return false;
         }
         for dep_uid in &task.dependencies {
-            // If we can't find the dependency, assume it's not blocking (or external)
-            // If found and NOT completed, then we are blocked.
-            if let Some(completed) = self.get_task_status(dep_uid)
-                && !completed
+            // Blocked if the dependency exists and is NOT done
+            if let Some(is_done) = self.is_task_done(dep_uid)
+                && !is_done
             {
                 return true;
             }

@@ -116,8 +116,12 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 }
             };
 
-            let checkbox = if t.completed { "[x]" } else { "[ ]" };
-
+            let checkbox = match t.status {
+                crate::model::TaskStatus::Completed => "[x]",
+                crate::model::TaskStatus::Cancelled => "[-]",
+                crate::model::TaskStatus::InProcess => "[>]",
+                crate::model::TaskStatus::NeedsAction => "[ ]",
+            };
             // Add [B] indicator if blocked
             let blocked_str = if is_blocked { " [B]" } else { "" };
 

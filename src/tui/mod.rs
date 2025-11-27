@@ -201,7 +201,19 @@ pub async fn run() -> Result<()> {
 
                 Action::ToggleTask(mut task) => {
                     let href = task.calendar_href.clone();
-                    task.completed = !task.completed; // Revert optimistic flip
+                    // Revert optimistic flip for API logic
+                    // (Actually the API logic I gave you uses 'toggle_task' which flips it AGAIN.
+                    // So we must pass the state BEFORE the optimistic flip).
+
+                    // Correct approach: We passed the FLIPPED task in the action.
+                    // We need to revert it to the OLD state, so the Client method can flip it back to NEW state
+                    // and respawn if needed.
+                    if task.status == crate::model::TaskStatus::Completed {
+                        task.status = crate::model::TaskStatus::NeedsAction;
+                    } else {
+                        task.status = crate::model::TaskStatus::Completed;
+                    }
+
                     match client.toggle_task(&mut task).await {
                         Ok(_) => {
                             let _ = event_tx.send(AppEvent::Status("Synced.".to_string())).await;
@@ -264,6 +276,39 @@ pub async fn run() -> Result<()> {
                                     let _ = event_tx.send(AppEvent::Error(e)).await;
                                 }
                             }
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
+                        }
+                    }
+                }
+                Action::MarkInProcess(mut task) => {
+                    if task.status == crate::model::TaskStatus::InProcess {
+                        task.status = crate::model::TaskStatus::NeedsAction;
+                    } else {
+                        task.status = crate::model::TaskStatus::InProcess;
+                    }
+
+                    // Direct update instead of using channel
+                    match client.update_task(&mut task).await {
+                        Ok(_) => {
+                            let _ = event_tx.send(AppEvent::Status("Saved.".to_string())).await;
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
+                        }
+                    }
+                }
+                Action::MarkCancelled(mut task) => {
+                    if task.status == crate::model::TaskStatus::Cancelled {
+                        task.status = crate::model::TaskStatus::NeedsAction;
+                    } else {
+                        task.status = crate::model::TaskStatus::Cancelled;
+                    }
+
+                    match client.update_task(&mut task).await {
+                        Ok(_) => {
+                            let _ = event_tx.send(AppEvent::Status("Saved.".to_string())).await;
                         }
                         Err(e) => {
                             let _ = event_tx.send(AppEvent::Error(e)).await;
@@ -450,6 +495,20 @@ pub async fn run() -> Result<()> {
                     },
 
                     InputMode::Normal => match key.code {
+                        KeyCode::Char('s') => {
+                            if app_state.active_focus == Focus::Main
+                                && let Some(view_task) = app_state.get_selected_task().cloned()
+                            {
+                                let _ = action_tx.send(Action::MarkInProcess(view_task)).await;
+                            }
+                        }
+                        KeyCode::Char('x') => {
+                            if app_state.active_focus == Focus::Main
+                                && let Some(view_task) = app_state.get_selected_task().cloned()
+                            {
+                                let _ = action_tx.send(Action::MarkCancelled(view_task)).await;
+                            }
+                        }
                         KeyCode::Char('q') => {
                             let _ = action_tx.send(Action::Quit).await;
                             break;
@@ -464,7 +523,7 @@ pub async fn run() -> Result<()> {
                             }
                         }
 
-                        // ADDED: 'c' to Make Child of Yanked
+                        // 'c' to Make Child of Yanked
                         KeyCode::Char('c') => {
                             if let Some(parent_uid) = &app_state.yanked_uid {
                                 if let Some(view_task) = app_state.get_selected_task().cloned() {
@@ -593,7 +652,12 @@ pub async fn run() -> Result<()> {
                                 if let Some(list) = app_state.store.calendars.get_mut(&cal_href)
                                     && let Some(t) = list.iter_mut().find(|t| t.uid == task.uid)
                                 {
-                                    t.completed = !t.completed;
+                                    // Optimistic Toggle
+                                    t.status = if t.status == crate::model::TaskStatus::Completed {
+                                        crate::model::TaskStatus::NeedsAction
+                                    } else {
+                                        crate::model::TaskStatus::Completed
+                                    };
                                     let t_flipped = t.clone();
                                     let _ = action_tx.send(Action::ToggleTask(t_flipped)).await;
                                 }

@@ -391,7 +391,6 @@ impl GuiApp {
                 }
                 Task::none()
             }
-
             Message::ToggleTask(index, _) => {
                 if let Some(view_task) = self.tasks.get(index) {
                     let uid = view_task.uid.clone();
@@ -400,9 +399,16 @@ impl GuiApp {
                     if let Some(cal_tasks) = self.store.calendars.get_mut(&cal_href)
                         && let Some(t) = cal_tasks.iter_mut().find(|t| t.uid == uid)
                     {
-                        t.completed = !t.completed;
+                        // Optimistic Toggle: Done <-> NeedsAction
+                        let old_status = t.status;
+                        t.status = if t.status == crate::model::TaskStatus::Completed {
+                            crate::model::TaskStatus::NeedsAction
+                        } else {
+                            crate::model::TaskStatus::Completed
+                        };
+
                         let mut server_task = t.clone();
-                        server_task.completed = !server_task.completed; // Revert for API call
+                        server_task.status = old_status; // Revert for API call (API does the toggle)
 
                         self.refresh_filtered_tasks();
 
@@ -554,6 +560,31 @@ impl GuiApp {
                         t.priority = new_prio;
                         let t_clone = t.clone();
                         self.refresh_filtered_tasks();
+                        if let Some(client) = &self.client {
+                            return Task::perform(
+                                async_update_wrapper(client.clone(), t_clone),
+                                Message::SyncSaved,
+                            );
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::SetTaskStatus(index, new_status) => {
+                if let Some(view_task) = self.tasks.get(index) {
+                    let uid = view_task.uid.clone();
+                    let cal_href = view_task.calendar_href.clone();
+
+                    if let Some(cal_tasks) = self.store.calendars.get_mut(&cal_href)
+                        && let Some(t) = cal_tasks.iter_mut().find(|t| t.uid == uid)
+                    {
+                        // 1. Optimistic Update
+                        t.status = new_status;
+                        let t_clone = t.clone();
+
+                        self.refresh_filtered_tasks();
+
+                        // 2. Sync
                         if let Some(client) = &self.client {
                             return Task::perform(
                                 async_update_wrapper(client.clone(), t_clone),

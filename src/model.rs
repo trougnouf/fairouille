@@ -7,12 +7,26 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TaskStatus {
+    NeedsAction,
+    InProcess,
+    Completed,
+    Cancelled,
+}
+
+impl TaskStatus {
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Completed | Self::Cancelled)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub uid: String,
     pub summary: String,
     pub description: String,
-    pub completed: bool,
+    pub status: TaskStatus,
     pub due: Option<DateTime<Utc>>,
     pub priority: u8,
     pub parent_uid: Option<String>,
@@ -188,7 +202,7 @@ impl Task {
             uid: Uuid::new_v4().to_string(),
             summary: String::new(),
             description: String::new(),
-            completed: false,
+            status: TaskStatus::NeedsAction,
             due: None,
             priority: 0,
             parent_uid: None,
@@ -219,7 +233,7 @@ impl Task {
                 next_task.uid = Uuid::new_v4().to_string();
                 next_task.href = String::new();
                 next_task.etag = String::new();
-                next_task.completed = false;
+                next_task.status = TaskStatus::NeedsAction;
                 next_task.due = Some(Utc.from_utc_datetime(&next_due.naive_utc()));
                 next_task.dependencies.clear();
                 return Some(next_task);
@@ -229,9 +243,21 @@ impl Task {
     }
 
     pub fn compare_with_cutoff(&self, other: &Self, cutoff: Option<DateTime<Utc>>) -> Ordering {
-        // 1. Completion always pushes to bottom
-        if self.completed != other.completed {
-            return self.completed.cmp(&other.completed);
+        // 1. Sort by Status Priority
+        // InProcess (0) < NeedsAction (1) < Completed (2) < Cancelled (3)
+        fn status_prio(s: TaskStatus) -> u8 {
+            match s {
+                TaskStatus::InProcess => 0,
+                TaskStatus::NeedsAction => 1,
+                TaskStatus::Completed => 2,
+                TaskStatus::Cancelled => 3,
+            }
+        }
+
+        let s1 = status_prio(self.status);
+        let s2 = status_prio(other.status);
+        if s1 != s2 {
+            return s1.cmp(&s2);
         }
 
         // Helper to check if a task is within the "Timed High Priority" window
@@ -349,11 +375,12 @@ impl Task {
         }
         todo.timestamp(Utc::now());
 
-        if self.completed {
-            todo.status(TodoStatus::Completed);
-        } else {
-            todo.status(TodoStatus::NeedsAction);
-        }
+        match self.status {
+            TaskStatus::NeedsAction => todo.status(TodoStatus::NeedsAction),
+            TaskStatus::InProcess => todo.status(TodoStatus::InProcess),
+            TaskStatus::Completed => todo.status(TodoStatus::Completed),
+            TaskStatus::Cancelled => todo.status(TodoStatus::Cancelled),
+        };
 
         if let Some(dt) = self.due {
             let formatted = dt.format("%Y%m%dT%H%M%SZ").to_string();
@@ -428,11 +455,17 @@ impl Task {
         let summary = todo.get_summary().unwrap_or("No Title").to_string();
         let description = todo.get_description().unwrap_or("").to_string();
         let uid = todo.get_uid().unwrap_or_default().to_string();
-        let completed = todo
-            .properties()
-            .get("STATUS")
-            .map(|p| p.value().trim().to_uppercase() == "COMPLETED")
-            .unwrap_or(false);
+
+        let status = if let Some(prop) = todo.properties().get("STATUS") {
+            match prop.value().trim().to_uppercase().as_str() {
+                "COMPLETED" => TaskStatus::Completed,
+                "IN-PROCESS" => TaskStatus::InProcess,
+                "CANCELLED" => TaskStatus::Cancelled,
+                _ => TaskStatus::NeedsAction,
+            }
+        } else {
+            TaskStatus::NeedsAction
+        };
         let priority = todo
             .properties()
             .get("PRIORITY")
@@ -528,7 +561,7 @@ impl Task {
             uid,
             summary,
             description,
-            completed,
+            status,
             due,
             priority,
             parent_uid,
@@ -545,33 +578,8 @@ impl Task {
 
 impl Ord for Task {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.completed != other.completed {
-            return self.completed.cmp(&other.completed);
-        }
-        match (self.due, other.due) {
-            (Some(d1), Some(d2)) => {
-                if d1 != d2 {
-                    return d1.cmp(&d2);
-                }
-            }
-            (Some(_), None) => return Ordering::Less,
-            (None, Some(_)) => return Ordering::Greater,
-            (None, None) => {}
-        }
-        let p1 = if self.priority == 0 {
-            10
-        } else {
-            self.priority
-        };
-        let p2 = if other.priority == 0 {
-            10
-        } else {
-            other.priority
-        };
-        if p1 != p2 {
-            return p1.cmp(&p2);
-        }
-        self.summary.cmp(&other.summary)
+        // Use the same comparison logic but without cutoff (always None)
+        self.compare_with_cutoff(other, None)
     }
 }
 impl PartialOrd for Task {

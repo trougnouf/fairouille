@@ -50,18 +50,20 @@ impl RustyClient {
 
         // 1. Try directly if it looks like a calendar (resource list)
         if let Ok(resources) = self.client.list_resources(&base_path).await
-            && resources.iter().any(|r| r.href.ends_with(".ics")) {
-                return Ok(base_path);
-            }
+            && resources.iter().any(|r| r.href.ends_with(".ics"))
+        {
+            return Ok(base_path);
+        }
 
         // 2. Try Principal -> Home Set -> First Calendar
         if let Ok(Some(principal)) = self.client.find_current_user_principal().await
             && let Ok(homes) = self.client.find_calendar_home_set(&principal).await
-                && let Some(home_url) = homes.first()
-                    && let Ok(cals) = self.client.find_calendars(home_url).await
-                        && let Some(first) = cals.first() {
-                            return Ok(first.href.clone());
-                        }
+            && let Some(home_url) = homes.first()
+            && let Ok(cals) = self.client.find_calendars(home_url).await
+            && let Some(first) = cals.first()
+        {
+            return Ok(first.href.clone());
+        }
 
         // Fallback to base
         Ok(base_path)
@@ -125,17 +127,18 @@ impl RustyClient {
         let mut tasks = Vec::new();
         for item in fetched {
             if let Ok(content) = item.content
-                && !content.data.is_empty() {
-                    // Pass calendar_href so the task knows its parent
-                    if let Ok(task) = Task::from_ics(
-                        &content.data,
-                        content.etag,
-                        item.href,
-                        calendar_href.to_string(),
-                    ) {
-                        tasks.push(task);
-                    }
+                && !content.data.is_empty()
+            {
+                // Pass calendar_href so the task knows its parent
+                if let Ok(task) = Task::from_ics(
+                    &content.data,
+                    content.etag,
+                    item.href,
+                    calendar_href.to_string(),
+                ) {
+                    tasks.push(task);
                 }
+            }
         }
         Ok(tasks)
     }
@@ -159,9 +162,10 @@ impl RustyClient {
         let mut results = Vec::new();
         for handle in handles {
             if let Ok((href, task_res)) = handle.await
-                && let Ok(tasks) = task_res {
-                    results.push((href, tasks));
-                }
+                && let Ok(tasks) = task_res
+            {
+                results.push((href, tasks));
+            }
         }
         Ok(results)
     }
@@ -219,9 +223,19 @@ impl RustyClient {
     }
 
     pub async fn toggle_task(&self, task: &mut Task) -> Result<(Task, Option<Task>), String> {
-        task.completed = !task.completed;
-        let next_task = if task.completed { task.respawn() } else { None };
+        // Simple toggle logic: If Completed -> NeedsAction. If Anything Else -> Completed.
+        // We do NOT toggle to Cancelled/InProcess via this helper.
+        if task.status == crate::model::TaskStatus::Completed {
+            task.status = crate::model::TaskStatus::NeedsAction;
+        } else {
+            task.status = crate::model::TaskStatus::Completed;
+        }
 
+        let next_task = if task.status == crate::model::TaskStatus::Completed {
+            task.respawn()
+        } else {
+            None
+        };
         let mut created_task = None;
         if let Some(mut next) = next_task {
             // Next task inherits calendar_href from the parent in respawn() (via clone)

@@ -31,6 +31,7 @@ pub enum Message {
     EditTaskStart(usize),
     CancelEdit,
     ChangePriority(usize, i8),
+    SetTaskStatus(usize, crate::model::TaskStatus),
     ToggleDetails(String),
     ConfigLoaded(Result<Config, String>),
     ObSortMonthsChanged(String),

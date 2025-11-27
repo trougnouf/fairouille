@@ -422,6 +422,36 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
     }
 
     let btn_style = button::secondary;
+
+    // Status Controls
+    if task.status != crate::model::TaskStatus::Completed
+        && task.status != crate::model::TaskStatus::Cancelled
+    {
+        // Start/Pause Button
+        let (icon, msg_status) = if task.status == crate::model::TaskStatus::InProcess {
+            ("||", crate::model::TaskStatus::NeedsAction)
+        } else {
+            (">", crate::model::TaskStatus::InProcess)
+        };
+        actions = actions.push(
+            button(text(icon).size(14))
+                .style(btn_style)
+                .padding(5)
+                .on_press(Message::SetTaskStatus(index, msg_status)),
+        );
+
+        // Cancel Button
+        actions = actions.push(
+            button(text("ø").size(14))
+                .style(button::danger)
+                .padding(5)
+                .on_press(Message::SetTaskStatus(
+                    index,
+                    crate::model::TaskStatus::Cancelled,
+                )),
+        );
+    }
+
     actions = actions.push(
         button(text("+").size(14))
             .style(btn_style)
@@ -453,7 +483,8 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
 
     let row_main = row![
         indent,
-        checkbox("", task.completed).on_toggle(move |b| Message::ToggleTask(index, b)),
+        checkbox("", task.status == crate::model::TaskStatus::Completed)
+            .on_toggle(move |b| Message::ToggleTask(index, b)),
         column![
             title_row,
             // Show tags line if there are tags OR recurrence OR task is blocked
@@ -500,7 +531,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
                     .store
                     .get_summary(dep_uid)
                     .unwrap_or_else(|| "Unknown Task".to_string());
-                let is_done = app.store.get_task_status(dep_uid).unwrap_or(false);
+                let is_done = app.store.is_task_done(dep_uid).unwrap_or(false);
                 let check = if is_done { "[x]" } else { "[ ]" };
                 details_col = details_col.push(
                     text(format!(" {} {}", check, name))
