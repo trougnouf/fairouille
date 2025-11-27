@@ -129,7 +129,7 @@ The search bar (in both GUI and TUI) supports powerful filtering syntax:
 *   `is:ongoing`: Show only ongoing (started) tasks.
 *   `is:active`: Show only active (not completed/cancelled) tasks.
 
-**Example:** `~<15m #urgent is:active` finds quick, urgent, active tasks.
+**Example:** `~<=15m !<4 is:active` finds quick, high-priority, active tasks.
 
 ## License
 GPL3
