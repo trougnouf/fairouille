@@ -41,7 +41,6 @@ pub enum Message {
     ConfigLoaded(Result<Config, String>),
     ObSortMonthsChanged(String),
 
-    // FIX: Use Type Alias
     Loaded(LoadedResult),
 
     SyncSaved(Result<TodoTask, String>),
@@ -72,4 +71,9 @@ pub enum Message {
     AliasValueInput(String),
     AddAlias,
     RemoveAlias(String),
+    // Triggered when user selects a target calendar
+    MoveTask(String, String), // (task_uid, target_calendar_href)
+
+    // Triggered when the async move finishes
+    TaskMoved(Result<TodoTask, String>),
 }

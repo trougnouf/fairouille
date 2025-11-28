@@ -3,10 +3,10 @@ use crate::tui::action::SidebarMode;
 use crate::tui::state::{AppState, Focus, InputMode};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
@@ -254,7 +254,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             let cursor_y = footer_area.y + 1;
             f.set_cursor_position((cursor_x, cursor_y));
         }
-        InputMode::Normal => {
+
+        InputMode::Normal | InputMode::Moving => {
             let f_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -276,7 +277,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 },
                 Focus::Main => {
                     let mut s =
-                        "/:Find | a:Add | e:Edit | E:Desc | d:Del | y:Yank | r:Sync".to_string();
+                        "/:Find | a:Add | e:Edit | E:Desc | M:Move | d:Del | y:Yank | r:Sync"
+                            .to_string();
 
                     // Only show Block/Child if something is in the clipboard
                     if state.yanked_uid.is_some() {
@@ -299,4 +301,52 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             f.render_widget(help, f_chunks[1]);
         }
     }
+    if state.mode == InputMode::Moving {
+        let area = centered_rect(60, 50, f.area());
+
+        let items: Vec<ListItem> = state
+            .move_targets
+            .iter()
+            .map(|c| ListItem::new(c.name.as_str()))
+            .collect();
+
+        let popup_list = List::new(items)
+            .block(
+                Block::default()
+                    .title(" Move task to... ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .highlight_style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::Blue),
+            );
+
+        // First render a `Clear` widget to erase the area behind the popup
+        f.render_widget(Clear, area);
+        // Then render the popup
+        f.render_stateful_widget(popup_list, area, &mut state.move_selection_state);
+    }
+}
+
+/// Helper function to create a centered rect using up certain percentages of the available rect.
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

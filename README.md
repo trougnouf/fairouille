@@ -99,15 +99,22 @@ Create a config file at:
 *   **Mac:** `~/Library/Application Support/com.cfait.cfait/config.toml`
 
 ```toml
-url = "https://caldav.example.com/remote.php/dav/calendars/user/"
+url = "https://localhost:5232/trougnouf/"
 username = "myuser"
 password = "mypassword"
 
-# Security: Allow self-signed certificates (Radicale/VPN)
+# Security: Allow self-signed certificates
 # Default: false
 allow_insecure_certs = true 
 
 default_calendar = "Personal" # Optional: Auto-selects this list on startup
+
+# Optional: Hide calendars you don't want to see (e.g., those without VTASKS capability).
+# Use the full calendar href, not the display name.
+#hidden_calendars = [
+#    "/trougnouf/1355814b-9f29-792d-6dba-f6c671304517/",
+#    "/trougnouf/36df9c8c-98e8-a920-7866-7b9d39bd8a24/",
+#]
 
 # Hide completed tasks in all views
 hide_completed = false

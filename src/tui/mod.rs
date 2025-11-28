@@ -361,6 +361,32 @@ pub async fn run() -> Result<()> {
                         }
                     }
                 }
+                Action::MoveTask(task, new_href) => {
+                    let old_href = task.calendar_href.clone();
+                    match client.move_task(&task, &new_href).await {
+                        Ok(_) => {
+                            let _ = event_tx.send(AppEvent::Status("Moved.".to_string())).await;
+                            // Refresh both calendars involved
+                            // (In a real implementation we might just return the two modified lists,
+                            // but fetching them ensures consistency)
+                            if let Ok(t1) = client.get_tasks(&old_href).await {
+                                let _ = event_tx
+                                    .send(AppEvent::TasksLoaded(vec![(old_href, t1)]))
+                                    .await;
+                            }
+                            if let Ok(t2) = client.get_tasks(&new_href).await {
+                                let _ = event_tx
+                                    .send(AppEvent::TasksLoaded(vec![(new_href, t2)]))
+                                    .await;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error(format!("Move failed: {}", e)))
+                                .await;
+                        }
+                    }
+                }
             }
         }
     });
@@ -539,6 +565,51 @@ pub async fn run() -> Result<()> {
                         }
                         _ => {}
                     },
+                    InputMode::Moving => match key.code {
+                        KeyCode::Esc => {
+                            app_state.mode = InputMode::Normal;
+                            app_state.message = String::new();
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => app_state.next_move_target(),
+                        KeyCode::Up | KeyCode::Char('k') => app_state.previous_move_target(),
+                        KeyCode::Enter => {
+                            if let Some(task) = app_state.get_selected_task().cloned() {
+                                if let Some(idx) = app_state.move_selection_state.selected() {
+                                    if let Some(target_cal) = app_state.move_targets.get(idx) {
+                                        let target_href = target_cal.href.clone();
+
+                                        // Optimistic Update
+                                        if let Some(old_list) =
+                                            app_state.store.calendars.get_mut(&task.calendar_href)
+                                        {
+                                            old_list.retain(|t| t.uid != task.uid);
+                                        }
+                                        let mut new_task_local = task.clone();
+                                        new_task_local.calendar_href = target_href.clone();
+                                        app_state
+                                            .store
+                                            .calendars
+                                            .entry(target_href.clone())
+                                            .or_default()
+                                            .push(new_task_local);
+                                        app_state.refresh_filtered_view();
+
+                                        let _ = action_tx
+                                            .send(Action::MoveTask(task, target_href))
+                                            .await;
+                                        app_state.message = format!(
+                                            "Moving '{}'...",
+                                            app_state
+                                                .get_selected_task()
+                                                .map_or("", |t| &t.summary)
+                                        );
+                                    }
+                                }
+                            }
+                            app_state.mode = InputMode::Normal;
+                        }
+                        _ => {}
+                    },
 
                     InputMode::Normal => match key.code {
                         KeyCode::Char('s') => {
@@ -643,6 +714,31 @@ pub async fn run() -> Result<()> {
                         KeyCode::Char('H') => {
                             app_state.hide_completed = !app_state.hide_completed;
                             app_state.refresh_filtered_view();
+                        }
+                        KeyCode::Char('M') => {
+                            // Shift + m
+                            if let Some(task) = app_state.get_selected_task() {
+                                let current_href = task.calendar_href.clone();
+                                app_state.move_targets = app_state
+                                    .calendars
+                                    .iter()
+                                    .filter(|c| {
+                                        c.href != current_href
+                                            && !app_state.hidden_calendars.contains(&c.href)
+                                    })
+                                    .cloned()
+                                    .collect();
+
+                                if app_state.move_targets.is_empty() {
+                                    app_state.message =
+                                        "No other calendars to move to.".to_string();
+                                } else {
+                                    app_state.move_selection_state.select(Some(0));
+                                    app_state.mode = InputMode::Moving;
+                                    app_state.message =
+                                        "Select a calendar and press Enter.".to_string();
+                                }
+                            }
                         }
 
                         KeyCode::Down | KeyCode::Char('j') => app_state.next(),

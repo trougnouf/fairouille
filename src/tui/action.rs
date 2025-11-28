@@ -19,6 +19,7 @@ pub enum Action {
     DeleteTask(Task),
     Refresh,
     Quit,
+    MoveTask(Task, String), // Task, New Calendar Href
 }
 
 #[derive(Debug)]

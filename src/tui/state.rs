@@ -17,6 +17,7 @@ pub enum InputMode {
     Searching,
     Editing,
     EditingDescription,
+    Moving,
 }
 
 pub struct AppState {
@@ -47,6 +48,8 @@ pub struct AppState {
     pub input_buffer: String,
     pub cursor_position: usize,
     pub editing_index: Option<usize>,
+    pub move_selection_state: ListState,
+    pub move_targets: Vec<CalendarListEntry>,
 
     pub yanked_uid: Option<String>, // Clipboard for linking tasks
     pub tag_aliases: HashMap<String, Vec<String>>,
@@ -88,6 +91,8 @@ impl AppState {
             input_buffer: String::new(),
             cursor_position: 0,
             editing_index: None,
+            move_selection_state: ListState::default(),
+            move_targets: Vec::new(),
             yanked_uid: None,
             tag_aliases: HashMap::new(),
         }
@@ -296,6 +301,39 @@ impl AppState {
             Focus::Main => Focus::Sidebar,
             Focus::Sidebar => Focus::Main,
         }
+    }
+    pub fn next_move_target(&mut self) {
+        if self.move_targets.is_empty() {
+            return;
+        }
+        let i = match self.move_selection_state.selected() {
+            Some(i) => {
+                if i >= self.move_targets.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.move_selection_state.select(Some(i));
+    }
+
+    pub fn previous_move_target(&mut self) {
+        if self.move_targets.is_empty() {
+            return;
+        }
+        let i = match self.move_selection_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.move_targets.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.move_selection_state.select(Some(i));
     }
 }
 

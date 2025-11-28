@@ -289,6 +289,27 @@ impl RustyClient {
         self.update_task(task).await?;
         Ok((task.clone(), created_task))
     }
+
+    pub async fn move_task(&self, task: &Task, new_calendar_href: &str) -> Result<Task, String> {
+        // 1. Prepare the new task object
+        let mut new_task = task.clone();
+        new_task.calendar_href = new_calendar_href.to_string();
+        new_task.href = String::new(); // Clear the old resource URL
+        new_task.etag = String::new(); // Clear the old ETag (it's a new resource)
+
+        // 2. Try to create it in the new location
+        // If this fails, we return early, and the old task is untouched (Safe).
+        self.create_task(&mut new_task).await?;
+
+        // 3. If create succeeded, delete the old one
+        // If this fails, we effectively have a duplicate, which is safer than losing data.
+        if let Err(e) = self.delete_task(task).await {
+            // Log warning but don't fail the whole operation, as the move technically "happened"
+            eprintln!("Warning: Failed to delete old task during move: {}", e);
+        }
+
+        Ok(new_task)
+    }
 }
 
 // Reuse the existing verifier

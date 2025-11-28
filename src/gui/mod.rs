@@ -829,6 +829,73 @@ impl GuiApp {
                 self.refresh_filtered_tasks();
                 Task::none()
             }
+            Message::MoveTask(task_uid, target_href) => {
+                // 1. Find the task
+                let mut task_to_move = None;
+                // We need to find which calendar it currently belongs to
+                'search: for tasks in self.store.calendars.values() {
+                    if let Some(t) = tasks.iter().find(|t| t.uid == task_uid) {
+                        task_to_move = Some(t.clone());
+                        break 'search;
+                    }
+                }
+
+                if let Some(task) = task_to_move {
+                    if task.calendar_href == target_href {
+                        return Task::none(); // Moving to same calendar, do nothing
+                    }
+
+                    // 2. Optimistic UI Update
+                    // Remove from old list
+                    if let Some(old_list) = self.store.calendars.get_mut(&task.calendar_href) {
+                        old_list.retain(|t| t.uid != task_uid);
+                        let _ = Cache::save(&task.calendar_href, old_list);
+                    }
+
+                    // Add to new list (locally constructed version)
+                    let mut local_moved = task.clone();
+                    local_moved.calendar_href = target_href.clone();
+                    self.store
+                        .calendars
+                        .entry(target_href.clone())
+                        .or_default()
+                        .push(local_moved);
+                    // Note: We don't save cache for new list yet, waiting for server ETag
+
+                    self.refresh_filtered_tasks();
+
+                    // 3. API Call
+                    if let Some(client) = &self.client {
+                        return Task::perform(
+                            async_move_wrapper(client.clone(), task, target_href),
+                            Message::TaskMoved,
+                        );
+                    }
+                }
+                Task::none()
+            }
+
+            Message::TaskMoved(Ok(new_task)) => {
+                // Server confirmed creation. Update the store with the "real" task (w/ ETag)
+                if let Some(list) = self.store.calendars.get_mut(&new_task.calendar_href) {
+                    // Replace the optimistic one (which has no ETag) with the real one
+                    if let Some(idx) = list.iter().position(|t| t.uid == new_task.uid) {
+                        list[idx] = new_task.clone();
+                    } else {
+                        // Should be there from optimistic update, but just in case
+                        list.push(new_task.clone());
+                    }
+                    let _ = Cache::save(&new_task.calendar_href, list);
+                }
+                self.refresh_filtered_tasks();
+                Task::none()
+            }
+
+            Message::TaskMoved(Err(e)) => {
+                self.error_msg = Some(format!("Move failed: {}", e));
+                // Ideally: Revert optimistic update here (reload from disk/network)
+                Task::none()
+            }
         }
     }
 }
@@ -975,4 +1042,15 @@ async fn async_create(client: RustyClient, mut task: TodoTask) -> Result<TodoTas
 async fn async_update(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
     client.update_task(&mut task).await?;
     Ok(task)
+}
+
+async fn async_move_wrapper(
+    client: RustyClient,
+    task: TodoTask,
+    new_href: String,
+) -> Result<TodoTask, String> {
+    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
+    rt.spawn(async move { client.move_task(&task, &new_href).await })
+        .await
+        .map_err(|e| e.to_string())?
 }

@@ -370,20 +370,66 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
             .style(button::primary)
             .on_press(Message::SubmitTask);
 
-        column![
-            row![
-                text("Editing")
-                    .size(14)
-                    .color(Color::from_rgb(0.7, 0.7, 1.0)),
-                horizontal_space(),
-                cancel_btn,
-                save_btn
-            ]
-            .spacing(10),
-            input_title,
-            input_desc
+        // 1. Top Bar: Label + Save/Cancel (Always clean, never blocked)
+        let top_bar = row![
+            text("Editing")
+                .size(14)
+                .color(Color::from_rgb(0.7, 0.7, 1.0)),
+            horizontal_space(),
+            cancel_btn,
+            save_btn
         ]
-        .spacing(5)
+        .align_y(iced::Alignment::Center)
+        .spacing(10);
+
+        // 2. Move Section (Conditional, Filtered, Scrollable)
+        let mut move_element: Element<'_, Message> = row![].into();
+
+        if let Some(edit_uid) = &app.editing_uid {
+            if let Some(task) = app.tasks.iter().find(|t| t.uid == *edit_uid) {
+                // Filter: Exclude current calendar AND hidden calendars
+                let targets: Vec<_> = app
+                    .calendars
+                    .iter()
+                    .filter(|c| {
+                        c.href != task.calendar_href && !app.hidden_calendars.contains(&c.href)
+                    })
+                    .collect();
+
+                if !targets.is_empty() {
+                    let label = text("Move to:")
+                        .size(12)
+                        .color(Color::from_rgb(0.6, 0.6, 0.6));
+
+                    let mut btn_row = row![].spacing(5);
+                    for cal in targets {
+                        btn_row = btn_row.push(
+                            button(text(&cal.name).size(12))
+                                .style(button::secondary)
+                                .padding(5)
+                                .on_press(Message::MoveTask(task.uid.clone(), cal.href.clone())),
+                        );
+                    }
+
+                    move_element = row![
+                        label,
+                        scrollable(btn_row).height(30) // Constrain height to prevent layout jumps
+                    ]
+                    .spacing(10)
+                    .align_y(iced::Alignment::Center)
+                    .into();
+                }
+            }
+        }
+
+        // 3. Assemble Layout
+        column![
+            top_bar,
+            input_title,
+            input_desc,
+            move_element // Placed at bottom of edit area, or swap with input_desc if preferred
+        ]
+        .spacing(10)
         .into()
     } else {
         column![input_title,].spacing(5).into()
@@ -769,6 +815,37 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             }
         }
 
+        // Only show if we have multiple calendars
+        if app.calendars.len() > 1 {
+            let current_cal_href = task.calendar_href.clone();
+
+            // Build a list of target calendars (excluding the current one)
+            let targets: Vec<_> = app
+                .calendars
+                .iter()
+                .filter(|c| c.href != current_cal_href)
+                .collect();
+
+            let move_label = text("Move to:")
+                .size(12)
+                .color(Color::from_rgb(0.5, 0.5, 0.5));
+
+            // We use a Row of buttons for targets (simpler than PickList for per-row state)
+            // Or a PickList if you prefer. A row of small buttons is often faster.
+            let mut move_row = row![move_label].spacing(5).align_y(iced::Alignment::Center);
+
+            for cal in targets {
+                move_row = move_row.push(
+                    button(text(&cal.name).size(10))
+                        .style(button::secondary)
+                        .padding(3)
+                        .on_press(Message::MoveTask(task.uid.clone(), cal.href.clone())),
+                );
+            }
+
+            details_col = details_col.push(move_row);
+        }
+
         let desc_row = row![
             horizontal_space().width(Length::Fixed(indent_size as f32 + 30.0)),
             details_col
@@ -952,7 +1029,7 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         .padding(10)
         .on_press(Message::ObSubmit),
     );
-    let insecure_check = checkbox("Allow Insecure SSL (Self-signed/VPN)", app.ob_insecure)
+    let insecure_check = checkbox("Allow Insecure SSL (e.g. self-signed)", app.ob_insecure)
         .on_toggle(Message::ObInsecureToggled)
         .size(16)
         .text_size(14);
