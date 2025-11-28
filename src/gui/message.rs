@@ -45,10 +45,10 @@ pub enum Message {
 
     SyncSaved(Result<TodoTask, String>),
 
-    // FIX: Box the large variant to satisfy clippy::large_enum_variant
+    // Box the large variant to satisfy clippy::large_enum_variant
     SyncToggleComplete(Box<Result<(TodoTask, Option<TodoTask>), String>>),
 
-    TasksRefreshed(Result<Vec<TodoTask>, String>),
+    TasksRefreshed(Result<(String, Vec<TodoTask>), String>),
     DeleteComplete(#[allow(dead_code)] Result<(), String>),
 
     SidebarModeChanged(SidebarMode),
@@ -76,4 +76,9 @@ pub enum Message {
 
     // Triggered when the async move finishes
     TaskMoved(Result<TodoTask, String>),
+    ObSubmitOffline,
+    MigrateLocalTo(String), // target_href
+
+    // Result
+    MigrationComplete(Result<usize, String>),
 }

@@ -1,7 +1,7 @@
 # Cfait
 > Take control of your TODO list
 
-**Cfait** is a simple, elegant, and lightweight CalDAV task manager, written in Rust.
+**Cfait** is a powerful, simple, elegant, and lightweight CalDAV task manager, written in Rust.
 
 It features both an efficient **TUI (Terminal UI)** and a modern **GUI (Graphical UI)** for desktop integration.
 
@@ -23,7 +23,8 @@ It features both an efficient **TUI (Terminal UI)** and a modern **GUI (Graphica
 *   **Dependencies:** Link tasks using RFC 9253 (Blocked By) logic.
 *   **Hierarchy Support:** Create sub-tasks and organize nested lists easily.
 *   **Multiple Calendars:** Seamlessly switch between "Work", "Personal", and other lists.
-*   **Offline-First:** Optimistic UI updates mean you never wait for the server.
+*   **Offline & Local First:** Optimistic UI updates mean you never wait for the server. Possibility to use the app immediately without a server; a persistent "Local" calendar stores its tasks on disk.
+*   **Easy Migration:** When ready, export all tasks from the Local calendar to a CalDAV server with a single click.
 *   **Sane sorting:** Tasks are sorted by due date, then undated tasks are ordered by priority.
 
 
@@ -163,7 +164,7 @@ When adding (`a`) or editing (`e`) a task, you can use shortcuts directly in the
 *   `~30m`, `~1h`, `~2d`: Sets **Estimated Duration**.
 *   `@daily`, `@weekly`, `@monthly`, `@yearly`, `@every 4 days`, `@every 2 weeks`, etc: Sets Recurrence.
 *   `#tag` (e.g. `#Gardening`) to set a tag / category.
-    *   **Aliases:** If you have configured aliases (e.g. `groceries = ["home"]`), typing `#groceries` will automatically apply `#groceries` AND `#home`.
+    *   **Aliases:** If you have configured aliases (e.g., `groceries = ["home"]`), typing `#groceries` will automatically apply `#groceries` AND `#home`.
 
 ## Advanced Search
 The search bar (in both GUI and TUI) supports powerful filtering syntax:

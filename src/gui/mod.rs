@@ -8,6 +8,8 @@ use crate::config::Config;
 use crate::model::{CalendarListEntry, Task as TodoTask};
 use crate::store::FilterOptions;
 
+use crate::storage::{LOCAL_CALENDAR_HREF, LOCAL_CALENDAR_NAME};
+
 use chrono::{Duration, Utc};
 use iced::{Element, Task, Theme, window};
 use message::Message;
@@ -218,24 +220,94 @@ impl GuiApp {
                 Task::none()
             }
 
-            Message::Loaded(Ok((client, cals, tasks, active))) => {
+            Message::ObSubmitOffline => {
+                // Clear credentials in memory
+                self.ob_url.clear();
+                self.ob_user.clear();
+                self.ob_pass.clear();
+
+                // Create empty config
+                let config_to_save = Config {
+                    url: String::new(),
+                    username: String::new(),
+                    password: String::new(),
+                    default_calendar: None,
+                    allow_insecure_certs: false,
+                    hidden_calendars: Vec::new(),
+                    hide_completed: self.hide_completed,
+                    hide_fully_completed_tags: self.hide_fully_completed_tags,
+                    tag_aliases: self.tag_aliases.clone(),
+                    sort_cutoff_months: self.sort_cutoff_months,
+                };
+
+                // Save it (this persists the "Offline" preference)
+                let _ = config_to_save.save();
+
+                self.state = AppState::Loading;
+                // Connect with empty config -> RustyClient becomes Offline
+                Task::perform(connect_and_fetch_wrapper(config_to_save), Message::Loaded)
+            }
+
+            Message::Loaded(Ok((client, mut cals, tasks, mut active))) => {
                 self.client = Some(client.clone());
+
+                // 1. INJECT LOCAL CALENDAR
+                let local_entry = CalendarListEntry {
+                    name: LOCAL_CALENDAR_NAME.to_string(),
+                    href: LOCAL_CALENDAR_HREF.to_string(),
+                    color: None,
+                };
+
+                if !self.hidden_calendars.contains(LOCAL_CALENDAR_HREF) {
+                    cals.push(local_entry);
+                }
                 self.calendars = cals.clone();
 
-                // Load config defaults if we haven't already
+                // 2. INITIALIZE STORE (Clear old data first)
+                self.store.clear();
+
+                // 3. LOAD DATA INTO STORE
+
+                // A. Load Local Tasks (Synchronously via Client)
+                if let Ok(local_t) = TOKIO_RUNTIME
+                    .get()
+                    .expect("Runtime")
+                    .block_on(async { client.get_tasks(LOCAL_CALENDAR_HREF).await })
+                {
+                    self.store.insert(LOCAL_CALENDAR_HREF.to_string(), local_t);
+                }
+
+                // B. Load Disk Cache for Network Calendars
+                for cal in &self.calendars {
+                    if cal.href == LOCAL_CALENDAR_HREF {
+                        continue;
+                    }
+
+                    if let Ok(cached_tasks) = Cache::load(&cal.href) {
+                        self.store.insert(cal.href.clone(), cached_tasks);
+                    }
+                }
+
+                // 4. HANDLE ACTIVE SELECTION & FRESH DATA
+                if active.is_none() {
+                    active = Some(LOCAL_CALENDAR_HREF.to_string());
+                }
+
+                // If 'connect_and_fetch' successfully fetched the *active* network calendar,
+                // we should use that fresh data instead of the cache we just loaded.
+                if let Some(href) = &active {
+                    if href != LOCAL_CALENDAR_HREF {
+                        self.store.insert(href.clone(), tasks); // 'tasks' comes from Ok(...)
+                    }
+                }
+                self.active_cal_href = active;
+
+                // 5. LOAD/SAVE CONFIG
                 if let Ok(cfg) = Config::load() {
                     self.hide_completed = cfg.hide_completed;
                     self.hide_fully_completed_tags = cfg.hide_fully_completed_tags;
-                    self.tag_aliases = cfg.tag_aliases; // Load Map
+                    self.tag_aliases = cfg.tag_aliases;
                 }
-
-                self.store.clear();
-                if let Some(href) = &active {
-                    self.store.insert(href.clone(), tasks.clone());
-                    let _ = Cache::save(href, &tasks);
-                }
-
-                self.active_cal_href = active.clone();
 
                 // Auto-save successful connection params
                 if !self.ob_url.is_empty() {
@@ -246,21 +318,24 @@ impl GuiApp {
                         default_calendar: self.ob_default_cal.clone(),
                         hide_completed: self.hide_completed,
                         hide_fully_completed_tags: self.hide_fully_completed_tags,
-                        hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
                         allow_insecure_certs: self.ob_insecure,
+                        hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
                         tag_aliases: self.tag_aliases.clone(),
                         sort_cutoff_months: self.sort_cutoff_months,
                     }
                     .save();
                 }
 
+                // 6. UPDATE UI STATE
                 self.state = AppState::Active;
                 self.error_msg = None;
                 self.refresh_filtered_tasks();
-                self.loading = true;
 
+                // 7. START BACKGROUND SYNC
+                self.loading = true;
                 Task::perform(async_fetch_all_wrapper(client, cals), Message::RefreshedAll)
             }
+
             Message::Loaded(Err(e)) => {
                 self.error_msg = Some(format!("Connection Failed: {}", e));
                 self.state = AppState::Onboarding;
@@ -282,13 +357,21 @@ impl GuiApp {
                 self.loading = false;
                 Task::none()
             }
-            Message::TasksRefreshed(Ok(tasks)) => {
-                if let Some(href) = &self.active_cal_href {
-                    self.store.insert(href.clone(), tasks.clone());
-                    let _ = Cache::save(href, &tasks);
+            Message::TasksRefreshed(Ok((href, tasks))) => {
+                // Always update store (background sync is valid)
+                self.store.insert(href.clone(), tasks.clone());
+                // Cache it
+                if href != LOCAL_CALENDAR_HREF {
+                    let _ = Cache::save(&href, &tasks);
                 }
-                self.refresh_filtered_tasks();
-                self.loading = false;
+
+                // ONLY refresh view if this is still the active calendar
+                if self.active_cal_href.as_deref() == Some(&href) {
+                    self.refresh_filtered_tasks();
+                    self.loading = false;
+                }
+                // If it's not active, we quietly updated the background store.
+                // We do NOT turn off 'loading' if the active calendar is different (it might still be loading).
                 Task::none()
             }
             Message::TasksRefreshed(Err(e)) => {
@@ -335,10 +418,15 @@ impl GuiApp {
                     self.sidebar_mode = SidebarMode::Calendars;
                 }
                 self.active_cal_href = Some(href.clone());
-                self.refresh_filtered_tasks();
+                self.refresh_filtered_tasks(); // Instant switch using current Store data (Cache)
 
                 if let Some(client) = &self.client {
-                    self.loading = true;
+                    // Don't set loading=true if we have cached data to show immediately!
+                    // This makes the UI feel snappier.
+                    if self.store.calendars.get(&href).is_none() {
+                        self.loading = true;
+                    }
+
                     return Task::perform(
                         async_fetch_wrapper(client.clone(), href),
                         Message::TasksRefreshed,
@@ -896,6 +984,49 @@ impl GuiApp {
                 // Ideally: Revert optimistic update here (reload from disk/network)
                 Task::none()
             }
+            Message::MigrateLocalTo(target_href) => {
+                if let Some(local_tasks) = self.store.calendars.get(LOCAL_CALENDAR_HREF) {
+                    // Clone tasks to move to avoid borrowing issues
+                    let tasks_to_move = local_tasks.clone();
+
+                    if tasks_to_move.is_empty() {
+                        return Task::none();
+                    }
+
+                    // Set loading state to prevent user interaction during move
+                    self.loading = true;
+
+                    if let Some(client) = &self.client {
+                        return Task::perform(
+                            async_migrate_wrapper(client.clone(), tasks_to_move, target_href),
+                            Message::MigrationComplete,
+                        );
+                    }
+                }
+                Task::none()
+            }
+
+            Message::MigrationComplete(Ok(count)) => {
+                // Success!
+                self.loading = false;
+                self.error_msg = Some(format!("Exported {} tasks successfully.", count));
+
+                // Refresh everything to reflect changes (Local empty, Remote populated)
+                if let Some(client) = &self.client {
+                    self.loading = true;
+                    return Task::perform(
+                        async_fetch_all_wrapper(client.clone(), self.calendars.clone()),
+                        Message::RefreshedAll,
+                    );
+                }
+                Task::none()
+            }
+
+            Message::MigrationComplete(Err(e)) => {
+                self.loading = false;
+                self.error_msg = Some(format!("Export failed: {}", e));
+                Task::none()
+            }
         }
     }
 }
@@ -919,11 +1050,15 @@ async fn connect_and_fetch_wrapper(
         .map_err(|e| e.to_string())?
 }
 
-async fn async_fetch_wrapper(client: RustyClient, href: String) -> Result<Vec<TodoTask>, String> {
+async fn async_fetch_wrapper(
+    client: RustyClient,
+    href: String,
+) -> Result<(String, Vec<TodoTask>), String> {
     let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
+
     rt.spawn(async move {
         let tasks = client.get_tasks(&href).await.map_err(|e| e.to_string())?;
-        Ok(tasks)
+        Ok((href, tasks)) // Move 'href' into Ok
     })
     .await
     .map_err(|e| e.to_string())?
@@ -978,7 +1113,7 @@ async fn connect_and_fetch(
     ),
     String,
 > {
-    // This call is simple and should not have the complex error mapping.
+    // 1. Create Client (Now supports empty URL for Offline Mode)
     let client = RustyClient::new(
         &config.url,
         &config.username,
@@ -987,33 +1122,22 @@ async fn connect_and_fetch(
     )
     .map_err(|e| e.to_string())?;
 
-    let calendars = client.get_calendars().await.map_err(|e| {
-        let err_str = e.to_string();
-        // Check for common self-signed certificate errors.
-        if err_str.contains("InvalidCertificate") {
-            let mut helpful_msg =
-                "Connection failed: The server presented an invalid TLS/SSL certificate.".to_string();
-
-            // Give different advice based on whether the user has already tried the insecure option.
-            if !config.allow_insecure_certs {
-                helpful_msg.push_str(
-                    "\n\nIf you are connecting to a self-hosted server (like Radicale), try enabling the 'Allow Insecure SSL' option in Settings.",
-                );
-            } else {
-                helpful_msg.push_str(
-                    "\n\nEven with 'Allow Insecure SSL' enabled, the certificate is structurally invalid (e.g., a CA certificate is being used as a server certificate). Please check your server's TLS/SSL configuration.",
-                );
+    // 2. Fetch Calendars (Network)
+    // If offline, this returns empty list quickly.
+    let calendars = match client.get_calendars().await {
+        Ok(c) => c,
+        Err(e) => {
+            // Check for fatal Cert error to show helpful message
+            let err_str = e.to_string();
+            if err_str.contains("InvalidCertificate") {
+                return Err(format!("Connection failed: {}", err_str));
             }
-            // Always include the technical details for power-users.
-            helpful_msg.push_str(&format!("\n\nDetails: {}", err_str));
-            helpful_msg
-        } else {
-            // If it's not a certificate error, just pass it through.
-            err_str
+            // For other errors (e.g. timeout), return empty list so we can still use Local
+            vec![]
         }
-    })?;
+    };
 
-    // The rest of the function proceeds as before.
+    // 3. Determine Active Calendar
     let mut active_href = None;
     if let Some(def_cal) = &config.default_calendar {
         if let Some(found) = calendars
@@ -1028,13 +1152,17 @@ async fn connect_and_fetch(
         active_href = Some(href);
     }
 
+    // 4. Fetch Tasks (Network)
+    // Only fetch if we have a network active calendar. Local is handled in Message::Loaded.
     let tasks = if let Some(ref h) = active_href {
-        client.get_tasks(h).await.map_err(|e| e.to_string())?
+        client.get_tasks(h).await.unwrap_or_default()
     } else {
         vec![]
     };
+
     Ok((client, calendars, tasks, active_href))
 }
+
 async fn async_create(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
     client.create_task(&mut task).await?;
     Ok(task)
@@ -1051,6 +1179,17 @@ async fn async_move_wrapper(
 ) -> Result<TodoTask, String> {
     let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
     rt.spawn(async move { client.move_task(&task, &new_href).await })
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+async fn async_migrate_wrapper(
+    client: RustyClient,
+    tasks: Vec<TodoTask>,
+    target: String,
+) -> Result<usize, String> {
+    let rt = TOKIO_RUNTIME.get().expect("Runtime");
+    rt.spawn(async move { client.migrate_tasks(tasks, &target).await })
         .await
         .map_err(|e| e.to_string())?
 }

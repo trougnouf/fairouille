@@ -18,6 +18,7 @@ pub enum InputMode {
     Editing,
     EditingDescription,
     Moving,
+    Exporting,
 }
 
 pub struct AppState {
@@ -50,6 +51,8 @@ pub struct AppState {
     pub editing_index: Option<usize>,
     pub move_selection_state: ListState,
     pub move_targets: Vec<CalendarListEntry>,
+    pub export_selection_state: ListState,
+    pub export_targets: Vec<CalendarListEntry>,
 
     pub yanked_uid: Option<String>, // Clipboard for linking tasks
     pub tag_aliases: HashMap<String, Vec<String>>,
@@ -95,6 +98,8 @@ impl AppState {
             move_targets: Vec::new(),
             yanked_uid: None,
             tag_aliases: HashMap::new(),
+            export_selection_state: ListState::default(),
+            export_targets: Vec::new(),
         }
     }
 
@@ -334,6 +339,41 @@ impl AppState {
             None => 0,
         };
         self.move_selection_state.select(Some(i));
+    }
+    pub fn next_export_target(&mut self) {
+        // (Copy logic from next_move_target, replacing move_targets with export_targets)
+        if self.export_targets.is_empty() {
+            return;
+        }
+        let i = match self.export_selection_state.selected() {
+            Some(i) => {
+                if i >= self.export_targets.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.export_selection_state.select(Some(i));
+    }
+
+    pub fn previous_export_target(&mut self) {
+        // (Copy logic from previous_move_target)
+        if self.export_targets.is_empty() {
+            return;
+        }
+        let i = match self.export_selection_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.export_targets.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.export_selection_state.select(Some(i));
     }
 }
 

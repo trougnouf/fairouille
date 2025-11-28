@@ -1,3 +1,4 @@
+use crate::storage::LOCAL_CALENDAR_HREF;
 use crate::store::UNCATEGORIZED_ID;
 use crate::tui::action::SidebarMode;
 use crate::tui::state::{AppState, Focus, InputMode};
@@ -255,7 +256,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             f.set_cursor_position((cursor_x, cursor_y));
         }
 
-        InputMode::Normal | InputMode::Moving => {
+        InputMode::Normal | InputMode::Moving | InputMode::Exporting => {
             let f_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -279,7 +280,10 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                     let mut s =
                         "/:Find | a:Add | e:Edit | E:Desc | M:Move | d:Del | y:Yank | r:Sync"
                             .to_string();
-
+                    // Conditionally show 'X:Export'
+                    if state.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
+                        s.push_str(" | X:Export");
+                    }
                     // Only show Block/Child if something is in the clipboard
                     if state.yanked_uid.is_some() {
                         s.push_str(" | b:Block | c:Child");
@@ -327,6 +331,28 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         f.render_widget(Clear, area);
         // Then render the popup
         f.render_stateful_widget(popup_list, area, &mut state.move_selection_state);
+    }
+    if state.mode == InputMode::Exporting {
+        let area = centered_rect(60, 50, f.area());
+        let items: Vec<ListItem> = state
+            .export_targets
+            .iter()
+            .map(|c| ListItem::new(c.name.as_str()))
+            .collect();
+        let popup = List::new(items)
+            .block(
+                Block::default()
+                    .title(" Export all tasks to... ")
+                    .borders(Borders::ALL),
+            )
+            .highlight_style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::Blue),
+            );
+
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(popup, area, &mut state.export_selection_state);
     }
 }
 

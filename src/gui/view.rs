@@ -1,6 +1,7 @@
 use crate::gui::message::Message;
 use crate::gui::state::{AppState, GuiApp, SidebarMode};
 use crate::model::Task as TodoTask;
+use crate::storage::LOCAL_CALENDAR_HREF;
 use crate::store::UNCATEGORIZED_ID;
 
 use iced::widget::{
@@ -311,8 +312,47 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
         .padding(5)
         .size(16);
 
+    // --- NEW EXPORT LOGIC ---
+    let mut export_ui: Element<'_, Message> = row![].into();
+
+    // Check if we are viewing Local Calendar
+    if app.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
+        // Find valid export targets (server calendars that are not hidden)
+        let targets: Vec<_> = app
+            .calendars
+            .iter()
+            .filter(|c| c.href != LOCAL_CALENDAR_HREF && !app.hidden_calendars.contains(&c.href))
+            .collect();
+
+        if !targets.is_empty() {
+            // Build a row of "Export to [Name]" buttons
+            let mut row = row![
+                text("Export to:")
+                    .size(14)
+                    .color(Color::from_rgb(0.5, 0.5, 0.5))
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+
+            for cal in targets {
+                row = row.push(
+                    button(text(&cal.name).size(12))
+                        .style(button::secondary)
+                        .padding(5)
+                        .on_press(Message::MigrateLocalTo(cal.href.clone())),
+                );
+            }
+            export_ui = row.into();
+        }
+    }
+
+    // Add export_ui to the header row
     let header = row![
-        text(title_text).size(40),
+        column![
+            text(title_text).size(40),
+            export_ui // Show it right under the title
+        ]
+        .spacing(5),
         horizontal_space(),
         search_input.width(200)
     ]
@@ -990,10 +1030,13 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
 
         for cal in &app.calendars {
             let is_visible = !app.hidden_calendars.contains(&cal.href);
-            col = col.push(
+            let row_content = row![
                 checkbox(&cal.name, is_visible)
-                    .on_toggle(move |v| Message::ToggleCalendarVisibility(cal.href.clone(), v)),
-            );
+                    .on_toggle(move |v| Message::ToggleCalendarVisibility(cal.href.clone(), v))
+                    .width(Length::Fill)
+            ];
+
+            col = col.push(row_content.spacing(10).align_y(iced::Alignment::Center));
         }
 
         container(col)
@@ -1011,8 +1054,21 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         horizontal_space().width(0).into()
     };
 
+    // Initialize the buttons row before using it
     let mut buttons = row![].spacing(10);
+
+    if !is_settings {
+        // Onboarding screen
+        buttons = buttons.push(
+            button("Use Offline Mode")
+                .padding(10)
+                .style(button::secondary)
+                .on_press(Message::ObSubmitOffline),
+        );
+    }
+
     if is_settings {
+        // Settings screen
         buttons = buttons.push(
             button("Cancel")
                 .padding(10)
@@ -1020,6 +1076,8 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
                 .on_press(Message::CancelSettings),
         );
     }
+
+    // This button appears on both screens
     buttons = buttons.push(
         button(if is_settings {
             "Save & Connect"
@@ -1033,6 +1091,7 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         .on_toggle(Message::ObInsecureToggled)
         .size(16)
         .text_size(14);
+
     let form = column![
         text("CalDAV Server URL:"),
         text_input("https://...", &app.ob_url)
@@ -1056,7 +1115,7 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         buttons
     ]
     .spacing(15)
-    .max_width(500); // Increased width for alias inputs
+    .max_width(500);
 
     let content = column![title, error, form]
         .spacing(20)

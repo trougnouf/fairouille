@@ -5,8 +5,8 @@ pub mod view;
 use crate::cache::Cache;
 use crate::client::RustyClient;
 use crate::config;
-use crate::model::Task;
-
+use crate::model::{CalendarListEntry, Task};
+use crate::storage::{LOCAL_CALENDAR_HREF, LOCAL_CALENDAR_NAME, LocalStorage};
 use action::{Action, AppEvent, SidebarMode};
 use state::{AppState, Focus, InputMode};
 use view::draw;
@@ -41,9 +41,6 @@ pub async fn run() -> Result<()> {
         }
         default_hook(info);
     }));
-
-    let config_path_for_error = config::Config::get_path_string()
-        .unwrap_or_else(|_| "[Could not determine config path]".to_string());
 
     // Load Config
     let config_result = config::Config::load();
@@ -104,7 +101,8 @@ pub async fn run() -> Result<()> {
 
     // --- NETWORK THREAD ---
     tokio::spawn(async move {
-        // ... (Client init, Calendar Fetch, Task Fetch remain the same) ...
+        // Create Client (Unified Repository)
+        // If credentials are empty, RustyClient creates an offline client automatically.
         let client = match RustyClient::new(&url, &user, &pass, allow_insecure) {
             Ok(c) => c,
             Err(e) => {
@@ -116,79 +114,94 @@ pub async fn run() -> Result<()> {
             .send(AppEvent::Status("Connecting...".to_string()))
             .await;
 
-        // A. Fetch Calendars
-        // A. Fetch Calendars with proper error handling
-        let calendars = match client.get_calendars().await {
-            Ok(cals) => cals, // Success, we get the Vec of calendars
+        // A. Fetch Calendars (Network)
+        // This will be empty if offline or if network fails non-fatally
+        let mut calendars = match client.get_calendars().await {
+            Ok(cals) => cals,
             Err(e) => {
-                // Failure, construct a helpful error message
                 let err_str = e.to_string();
-                let final_err_msg = if err_str.contains("InvalidCertificate") {
+                if err_str.contains("InvalidCertificate") {
+                    // This is a FATAL configuration error. Build the helpful message and stop.
                     let mut helpful_msg =
                         "Connection failed: The server presented an invalid TLS/SSL certificate."
                             .to_string();
 
+                    // --- START OF MISSING CODE ---
                     let config_advice = format!(
                         "\n\nTo fix this, please edit your config file:\n  {}",
-                        config_path_for_error
+                        crate::config::Config::get_path_string()
+                            .unwrap_or_else(|_| "path unknown".to_string())
                     );
 
                     if !allow_insecure {
                         helpful_msg.push_str(
-                    "\nIf this is a self-hosted server (like Radicale), try setting 'allow_insecure_certs = true' in your config.",
-                );
+                            "\nIf this is a self-hosted server (like Radicale), try setting 'allow_insecure_certs = true' in your config.",
+                        );
                     } else {
                         helpful_msg.push_str(
-                    "\nEven with 'allow_insecure_certs = true', the certificate is invalid. Please check your server's TLS/SSL configuration.",
-                );
+                            "\nEven with 'allow_insecure_certs = true', the certificate is invalid. Please check your server's TLS/SSL configuration.",
+                        );
                     }
                     helpful_msg.push_str(&config_advice);
                     helpful_msg.push_str(&format!("\n\nDetails: {}", err_str));
-                    helpful_msg
-                } else {
-                    // Not a certificate error, just pass it through
-                    err_str
-                };
 
-                // Send a fatal error event to the UI and stop this network thread.
-                let _ = event_tx.send(AppEvent::Error(final_err_msg)).await;
-                return;
+                    let _ = event_tx.send(AppEvent::Error(helpful_msg)).await;
+                    return;
+                    // --- END OF MISSING CODE ---
+                } else {
+                    // This is a non-fatal network error (e.g., timeout, DNS fail).
+                    // We can proceed in offline mode. Send a status update and return an empty list.
+                    let _ = event_tx
+                        .send(AppEvent::Status(format!("Sync warning: {}", err_str)))
+                        .await;
+                    vec![]
+                }
             }
         };
 
-        // If we reach here, get_calendars() was successful.
+        // B. Inject Local Calendar
+        let local_cal = CalendarListEntry {
+            name: LOCAL_CALENDAR_NAME.to_string(),
+            href: LOCAL_CALENDAR_HREF.to_string(),
+            color: None,
+        };
+        calendars.push(local_cal);
+
         let _ = event_tx
             .send(AppEvent::CalendarsLoaded(calendars.clone()))
             .await;
 
-        // B. Load Cache (Fast) & Then Network (Slow)
-        // 1. Cache Load
+        // C. Fetch All Tasks (Smart Fetch)
+        // 1. Load Disk Cache for Network Cals (Performance)
         let mut cached_results = Vec::new();
         for cal in &calendars {
-            // Note: Use `&calendars` here now
-            if let Ok(tasks) = Cache::load(&cal.href) {
-                cached_results.push((cal.href.clone(), tasks));
+            if cal.href != LOCAL_CALENDAR_HREF {
+                if let Ok(tasks) = Cache::load(&cal.href) {
+                    cached_results.push((cal.href.clone(), tasks));
+                }
             }
         }
         if !cached_results.is_empty() {
             let _ = event_tx.send(AppEvent::TasksLoaded(cached_results)).await;
             let _ = event_tx
-                .send(AppEvent::Status("Loaded from cache.".to_string()))
+                .send(AppEvent::Status("Loaded cache.".to_string()))
                 .await;
         }
 
-        // 2. Network Sync
+        // 2. Fetch Fresh Data (Network + Local Disk)
+        // The RustyClient::get_all_tasks now handles routing!
         let _ = event_tx
             .send(AppEvent::Status("Syncing...".to_string()))
             .await;
         match client.get_all_tasks(&calendars).await {
-            // Note: Use `&calendars` here too
             Ok(results) => {
                 let _ = event_tx.send(AppEvent::TasksLoaded(results)).await;
                 let _ = event_tx.send(AppEvent::Status("Ready.".to_string())).await;
             }
             Err(e) => {
-                let _ = event_tx.send(AppEvent::Error(e)).await;
+                let _ = event_tx
+                    .send(AppEvent::Status(format!("Sync warning: {}", e)))
+                    .await;
             }
         }
 
@@ -308,20 +321,35 @@ pub async fn run() -> Result<()> {
                         .send(AppEvent::Status("Refreshing...".to_string()))
                         .await;
 
-                    match client.get_calendars().await {
-                        Ok(cals) => {
-                            let _ = event_tx.send(AppEvent::CalendarsLoaded(cals.clone())).await;
-                            match client.get_all_tasks(&cals).await {
-                                Ok(results) => {
-                                    let _ = event_tx.send(AppEvent::TasksLoaded(results)).await;
-                                    let _ = event_tx
-                                        .send(AppEvent::Status("Refreshed.".to_string()))
-                                        .await;
-                                }
-                                Err(e) => {
-                                    let _ = event_tx.send(AppEvent::Error(e)).await;
-                                }
-                            }
+                    // 1. Fetch Network Calendars
+                    let mut calendars = match client.get_calendars().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
+                            vec![] // Return empty on error so we can still inject Local
+                        }
+                    };
+
+                    // 2. INJECT LOCAL CALENDAR
+                    let local_cal = CalendarListEntry {
+                        name: LOCAL_CALENDAR_NAME.to_string(),
+                        href: LOCAL_CALENDAR_HREF.to_string(),
+                        color: None,
+                    };
+                    calendars.push(local_cal);
+                    // ----------------------------------------
+
+                    let _ = event_tx
+                        .send(AppEvent::CalendarsLoaded(calendars.clone()))
+                        .await;
+
+                    // 3. Fetch Tasks (Using the unified client)
+                    match client.get_all_tasks(&calendars).await {
+                        Ok(results) => {
+                            let _ = event_tx.send(AppEvent::TasksLoaded(results)).await;
+                            let _ = event_tx
+                                .send(AppEvent::Status("Refreshed.".to_string()))
+                                .await;
                         }
                         Err(e) => {
                             let _ = event_tx.send(AppEvent::Error(e)).await;
@@ -387,6 +415,45 @@ pub async fn run() -> Result<()> {
                         }
                     }
                 }
+                Action::MigrateLocal(target_href) => {
+                    // Fetch local tasks
+                    if let Ok(local_tasks) = LocalStorage::load() {
+                        let _ = event_tx
+                            .send(AppEvent::Status(format!(
+                                "Exporting {} tasks...",
+                                local_tasks.len()
+                            )))
+                            .await;
+
+                        // Use client logic
+                        match client.migrate_tasks(local_tasks, &target_href).await {
+                            Ok(count) => {
+                                let _ = event_tx
+                                    .send(AppEvent::Status(format!("Exported {} tasks.", count)))
+                                    .await;
+                                // Refresh logic: Fetch fresh states for Local (should be empty) and Target
+                                if let Ok(t1) = client.get_tasks(LOCAL_CALENDAR_HREF).await {
+                                    let _ = event_tx
+                                        .send(AppEvent::TasksLoaded(vec![(
+                                            LOCAL_CALENDAR_HREF.to_string(),
+                                            t1,
+                                        )]))
+                                        .await;
+                                }
+                                if let Ok(t2) = client.get_tasks(&target_href).await {
+                                    let _ = event_tx
+                                        .send(AppEvent::TasksLoaded(vec![(target_href, t2)]))
+                                        .await;
+                                }
+                            }
+                            Err(e) => {
+                                let _ = event_tx
+                                    .send(AppEvent::Error(format!("Export failed: {}", e)))
+                                    .await;
+                            }
+                        }
+                    }
+                }
             }
         }
     });
@@ -406,20 +473,23 @@ pub async fn run() -> Result<()> {
 
                 AppEvent::CalendarsLoaded(cals) => {
                     app_state.calendars = cals;
-                    // FIX: Respect Default Calendar Config
-                    if let Some(def) = &default_cal
-                        && let Some(found) = app_state
+
+                    // Respect server's default first, otherwise fall back to Local
+                    if let Some(def) = &default_cal {
+                        if let Some(found) = app_state
                             .calendars
                             .iter()
                             .find(|c| c.name == *def || c.href == *def)
-                    {
-                        app_state.active_cal_href = Some(found.href.clone());
+                        {
+                            app_state.active_cal_href = Some(found.href.clone());
+                        }
                     }
-                    // Fallback
-                    if app_state.active_cal_href.is_none() && !app_state.calendars.is_empty() {
-                        app_state.active_cal_href = Some(app_state.calendars[0].href.clone());
+
+                    // If still nothing (or default was invalid), select Local
+                    if app_state.active_cal_href.is_none() {
+                        app_state.active_cal_href = Some(LOCAL_CALENDAR_HREF.to_string());
                     }
-                    // If cache hasn't arrived yet, this might show empty, but that's fine.
+
                     app_state.refresh_filtered_view();
                 }
 
@@ -611,6 +681,28 @@ pub async fn run() -> Result<()> {
                         _ => {}
                     },
 
+                    InputMode::Exporting => match key.code {
+                        KeyCode::Esc => {
+                            app_state.mode = InputMode::Normal;
+                            app_state.message = String::new();
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => app_state.next_export_target(),
+                        KeyCode::Up | KeyCode::Char('k') => app_state.previous_export_target(),
+                        KeyCode::Enter => {
+                            if let Some(idx) = app_state.export_selection_state.selected() {
+                                if let Some(target) = app_state.export_targets.get(idx) {
+                                    // Send Action
+                                    let _ = action_tx
+                                        .send(Action::MigrateLocal(target.href.clone()))
+                                        .await;
+                                    // Optimistic: Clear local view immediately? Maybe safer to wait for confirm.
+                                    app_state.mode = InputMode::Normal;
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
+
                     InputMode::Normal => match key.code {
                         KeyCode::Char('s') => {
                             if app_state.active_focus == Focus::Main
@@ -750,14 +842,27 @@ pub async fn run() -> Result<()> {
                             if app_state.active_focus == Focus::Sidebar {
                                 match app_state.sidebar_mode {
                                     SidebarMode::Calendars => {
-                                        if let Some(idx) = app_state.cal_state.selected()
-                                            && let Some(href) =
-                                                app_state.calendars.get(idx).map(|c| c.href.clone())
-                                        {
-                                            app_state.active_cal_href = Some(href.clone());
-                                            app_state.refresh_filtered_view();
-                                            let _ =
-                                                action_tx.send(Action::SwitchCalendar(href)).await;
+                                        if let Some(idx) = app_state.cal_state.selected() {
+                                            let visible_cals: Vec<&CalendarListEntry> = app_state
+                                                .calendars
+                                                .iter()
+                                                .filter(|c| {
+                                                    !app_state.hidden_calendars.contains(&c.href)
+                                                })
+                                                .collect();
+
+                                            if let Some(cal) = visible_cals.get(idx) {
+                                                let href = cal.href.clone();
+                                                app_state.active_cal_href = Some(href.clone());
+                                                app_state.refresh_filtered_view(); // Updates view from Store immediately
+
+                                                // ONLY send network request if NOT local
+                                                if href != LOCAL_CALENDAR_HREF {
+                                                    let _ = action_tx
+                                                        .send(Action::SwitchCalendar(href))
+                                                        .await;
+                                                }
+                                            }
                                         }
                                     }
                                     SidebarMode::Categories => {
@@ -980,6 +1085,34 @@ pub async fn run() -> Result<()> {
                             } else {
                                 app_state.message =
                                     "Nothing yanked! Press 'y' on a task first.".to_string();
+                            }
+                        }
+                        KeyCode::Char('X') => {
+                            // Shift + x
+                            // Only allow if active calendar is Local
+                            if app_state.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
+                                // Filter targets (All remote cals)
+                                app_state.export_targets = app_state
+                                    .calendars
+                                    .iter()
+                                    .filter(|c| {
+                                        c.href != LOCAL_CALENDAR_HREF
+                                            && !app_state.hidden_calendars.contains(&c.href)
+                                    })
+                                    .cloned()
+                                    .collect();
+
+                                if app_state.export_targets.is_empty() {
+                                    app_state.message =
+                                        "No remote calendars to export to.".to_string();
+                                } else {
+                                    app_state.export_selection_state.select(Some(0));
+                                    app_state.mode = InputMode::Exporting;
+                                    app_state.message = "Select export target...".to_string();
+                                }
+                            } else {
+                                app_state.message =
+                                    "Export only available from Local calendar.".to_string();
                             }
                         }
 

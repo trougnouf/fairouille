@@ -20,6 +20,7 @@ pub enum Action {
     Refresh,
     Quit,
     MoveTask(Task, String), // Task, New Calendar Href
+    MigrateLocal(String),   // target_href
 }
 
 #[derive(Debug)]
