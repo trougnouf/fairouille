@@ -127,6 +127,7 @@ fn view_sidebar_calendars(app: &GuiApp) -> Element<'_, Message> {
     column(
         app.calendars
             .iter()
+            .filter(|c| !app.hidden_calendars.contains(&c.href))
             .map(|cal| {
                 let is_active = app.active_cal_href.as_ref() == Some(&cal.href);
                 let btn = button(text(&cal.name).size(16))
@@ -154,6 +155,7 @@ fn view_sidebar_categories(app: &GuiApp) -> Element<'_, Message> {
         app.hide_completed,
         app.hide_fully_completed_tags,
         &app.selected_categories,
+        &app.hidden_calendars,
     );
 
     let logic_text = if app.match_all_categories {
@@ -906,6 +908,32 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         horizontal_space().width(0).into()
     };
 
+    let cal_mgmt_ui: Element<_> = if is_settings && !app.calendars.is_empty() {
+        let mut col = column![text("Manage Calendars").size(20)].spacing(10);
+
+        for cal in &app.calendars {
+            let is_visible = !app.hidden_calendars.contains(&cal.href);
+            col = col.push(
+                checkbox(&cal.name, is_visible)
+                    .on_toggle(move |v| Message::ToggleCalendarVisibility(cal.href.clone(), v)),
+            );
+        }
+
+        container(col)
+            .padding(10)
+            .style(|_| container::Style {
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    width: 1.0,
+                    color: Color::from_rgb(0.3, 0.3, 0.3),
+                },
+                ..Default::default()
+            })
+            .into()
+    } else {
+        horizontal_space().width(0).into()
+    };
+
     let mut buttons = row![].spacing(10);
     if is_settings {
         buttons = buttons.push(
@@ -946,7 +974,8 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         picker,
         prefs,
         sorting_ui,
-        aliases_ui, // Insert here
+        aliases_ui,
+        cal_mgmt_ui,
         buttons
     ]
     .spacing(15)

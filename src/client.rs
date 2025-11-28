@@ -124,8 +124,16 @@ impl RustyClient {
             .find_calendars(home_url)
             .await
             .map_err(|e| format!("{:?}", e))?;
+
         let mut calendars = Vec::new();
+
         for col in collections {
+            // NOTE: We attempted to filter by 'supported-calendar-component-set' here,
+            // but the underlying XML parser discards attributes on empty tags (e.g. <comp name="VTODO"/>),
+            // making it impossible to distinguish between VEVENT-only and VTODO-only calendars
+            // without a raw PROPFIND, which libdav hides.
+            // We default to showing all calendars.
+
             let prop = PropertyName::new("DAV:", "displayname");
             let name = self
                 .client
@@ -133,6 +141,7 @@ impl RustyClient {
                 .await
                 .unwrap_or(None)
                 .unwrap_or(col.href.clone());
+
             calendars.push(CalendarListEntry {
                 name,
                 href: col.href,

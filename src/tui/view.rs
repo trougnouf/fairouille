@@ -38,6 +38,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             let items: Vec<ListItem> = state
                 .calendars
                 .iter()
+                .filter(|c| !state.hidden_calendars.contains(&c.href))
                 .map(|c| {
                     let prefix = if Some(&c.href) == state.active_cal_href.as_ref() {
                         "* "
@@ -54,6 +55,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 state.hide_completed,
                 state.hide_fully_completed_tags,
                 &state.selected_categories,
+                &state.hidden_calendars,
             );
 
             let items: Vec<ListItem> = all_cats

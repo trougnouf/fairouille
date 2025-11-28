@@ -19,6 +19,7 @@ pub enum Message {
     ObUserChanged(String),
     ObPassChanged(String),
     ObInsecureToggled(bool),
+    ToggleCalendarVisibility(String, bool), // (href, is_visible)
     ObDefaultCalChanged(String),
     ObSubmit,
     OpenSettings,

@@ -57,6 +57,7 @@ pub async fn run() -> Result<()> {
         tag_aliases,
         sort_cutoff,
         allow_insecure,
+        hidden_calendars, // <--- This is the 10th element
     ) = match config_result {
         Ok(cfg) => (
             cfg.url,
@@ -68,6 +69,7 @@ pub async fn run() -> Result<()> {
             cfg.tag_aliases,
             cfg.sort_cutoff_months,
             cfg.allow_insecure_certs,
+            cfg.hidden_calendars, // <--- This matches
         ),
         Err(_) => {
             let path_str = match config::Config::get_path_string() {
@@ -95,6 +97,7 @@ pub async fn run() -> Result<()> {
     app_state.hide_fully_completed_tags = hide_fully_completed_tags;
     app_state.tag_aliases = tag_aliases;
     app_state.sort_cutoff_months = sort_cutoff;
+    app_state.hidden_calendars = hidden_calendars.into_iter().collect();
 
     let (action_tx, mut action_rx) = mpsc::channel(10);
     let (event_tx, mut event_rx) = mpsc::channel(10);
@@ -666,6 +669,7 @@ pub async fn run() -> Result<()> {
                                             app_state.hide_completed,
                                             app_state.hide_fully_completed_tags,
                                             &app_state.selected_categories,
+                                            &app_state.hidden_calendars,
                                         );
 
                                         if let Some(idx) = app_state.cal_state.selected()

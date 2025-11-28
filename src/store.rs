@@ -12,6 +12,7 @@ pub struct TaskStore {
 
 pub struct FilterOptions<'a> {
     pub active_cal_href: Option<&'a str>,
+    pub hidden_calendars: &'a std::collections::HashSet<String>,
     pub selected_categories: &'a HashSet<String>,
     pub match_all_categories: bool,
     pub search_term: &'a str,
@@ -40,11 +41,15 @@ impl TaskStore {
         hide_completed: bool,
         hide_fully_completed_tags: bool,
         forced_includes: &HashSet<String>,
+        hidden_calendars: &HashSet<String>,
     ) -> Vec<String> {
         let mut set = HashSet::new();
         let mut has_uncategorized = false;
 
-        for tasks in self.calendars.values() {
+        for (href, tasks) in &self.calendars {
+            if hidden_calendars.contains(href) {
+                continue;
+            }
             for task in tasks {
                 let is_done = task.status.is_done();
 
@@ -87,12 +92,18 @@ impl TaskStore {
         let mut raw_tasks = Vec::new();
 
         if let Some(href) = options.active_cal_href {
-            if let Some(tasks) = self.calendars.get(href) {
-                raw_tasks.extend(tasks.clone());
+            // If explicit calendar selected, ignore hidden list (unless it matches)
+            if !options.hidden_calendars.contains(href) {
+                if let Some(tasks) = self.calendars.get(href) {
+                    raw_tasks.extend(tasks.clone());
+                }
             }
         } else {
-            for tasks in self.calendars.values() {
-                raw_tasks.extend(tasks.clone());
+            // "All Tasks" view: Skip hidden calendars
+            for (href, tasks) in &self.calendars {
+                if !options.hidden_calendars.contains(href) {
+                    raw_tasks.extend(tasks.clone());
+                }
             }
         }
 

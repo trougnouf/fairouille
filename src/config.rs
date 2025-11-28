@@ -25,6 +25,9 @@ pub struct Config {
     pub allow_insecure_certs: bool,
 
     #[serde(default)]
+    pub hidden_calendars: Vec<String>,
+
+    #[serde(default)]
     pub hide_completed: bool,
     #[serde(default = "default_true")]
     pub hide_fully_completed_tags: bool,

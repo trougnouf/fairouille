@@ -36,6 +36,7 @@ pub struct AppState {
     // Filter State
     pub sidebar_mode: SidebarMode,
     pub active_cal_href: Option<String>,
+    pub hidden_calendars: HashSet<String>,
     pub selected_categories: HashSet<String>,
     pub match_all_categories: bool,
     pub hide_completed: bool,
@@ -77,6 +78,7 @@ impl AppState {
 
             sidebar_mode: SidebarMode::Calendars,
             active_cal_href: None,
+            hidden_calendars: HashSet::new(),
             selected_categories: HashSet::new(),
             match_all_categories: false,
             hide_completed: false,
@@ -116,6 +118,7 @@ impl AppState {
             active_cal_href: cal_filter,
             selected_categories: &self.selected_categories,
             match_all_categories: self.match_all_categories,
+            hidden_calendars: &self.hidden_calendars,
             search_term,
             hide_completed_global: self.hide_completed,
             cutoff_date,
@@ -205,6 +208,7 @@ impl AppState {
                             self.hide_completed,
                             self.hide_fully_completed_tags,
                             &self.selected_categories,
+                            &self.hidden_calendars,
                         )
                         .len(),
                 };
@@ -253,6 +257,7 @@ impl AppState {
                             self.hide_completed,
                             self.hide_fully_completed_tags,
                             &self.selected_categories,
+                            &self.hidden_calendars,
                         )
                         .len(),
                 };

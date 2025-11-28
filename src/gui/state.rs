@@ -32,6 +32,7 @@ pub struct GuiApp {
     // UI State
     pub sidebar_mode: SidebarMode,
     pub active_cal_href: Option<String>,
+    pub hidden_calendars: HashSet<String>,
     pub selected_categories: HashSet<String>,
     pub match_all_categories: bool,
     pub yanked_uid: Option<String>,
@@ -82,6 +83,7 @@ impl Default for GuiApp {
 
             sidebar_mode: SidebarMode::Calendars,
             active_cal_href: None,
+            hidden_calendars: HashSet::new(),
             selected_categories: HashSet::new(),
             match_all_categories: false,
             yanked_uid: None,

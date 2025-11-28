@@ -69,6 +69,7 @@ impl GuiApp {
             hide_completed: self.hide_completed,
             hide_fully_completed_tags: self.hide_fully_completed_tags,
             allow_insecure_certs: self.ob_insecure,
+            hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
             tag_aliases: self.tag_aliases.clone(),
             sort_cutoff_months: self.sort_cutoff_months,
         }
@@ -94,6 +95,7 @@ impl GuiApp {
 
         self.tasks = self.store.filter(FilterOptions {
             active_cal_href: cal_filter,
+            hidden_calendars: &self.hidden_calendars,
             selected_categories: &self.selected_categories,
             match_all_categories: self.match_all_categories,
             search_term: &self.search_value,
@@ -108,6 +110,7 @@ impl GuiApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ConfigLoaded(Ok(config)) => {
+                self.hidden_calendars = config.hidden_calendars.clone().into_iter().collect();
                 self.sort_cutoff_months = config.sort_cutoff_months;
                 self.ob_sort_months_input = match config.sort_cutoff_months {
                     Some(m) => m.to_string(),
@@ -159,6 +162,7 @@ impl GuiApp {
                     password: String::new(),
                     default_calendar: None,
                     allow_insecure_certs: false,
+                    hidden_calendars: Vec::new(),
                     hide_completed: self.hide_completed,
                     hide_fully_completed_tags: self.hide_fully_completed_tags,
                     tag_aliases: self.tag_aliases.clone(), // Use in-memory aliases if any
@@ -172,6 +176,7 @@ impl GuiApp {
                 config_to_save.password = self.ob_pass.clone();
                 config_to_save.default_calendar = self.ob_default_cal.clone();
                 config_to_save.allow_insecure_certs = self.ob_insecure;
+                config_to_save.hidden_calendars = self.hidden_calendars.iter().cloned().collect();
                 config_to_save.hide_completed = self.hide_completed;
                 config_to_save.hide_fully_completed_tags = self.hide_fully_completed_tags;
                 config_to_save.tag_aliases = self.tag_aliases.clone();
@@ -197,6 +202,7 @@ impl GuiApp {
                     self.hide_completed = cfg.hide_completed;
                     self.hide_fully_completed_tags = cfg.hide_fully_completed_tags;
                     self.ob_insecure = cfg.allow_insecure_certs;
+                    self.hidden_calendars = cfg.hidden_calendars.into_iter().collect();
                     self.tag_aliases = cfg.tag_aliases; // Load Map
                     self.sort_cutoff_months = cfg.sort_cutoff_months;
                     self.ob_sort_months_input = match cfg.sort_cutoff_months {
@@ -240,6 +246,7 @@ impl GuiApp {
                         default_calendar: self.ob_default_cal.clone(),
                         hide_completed: self.hide_completed,
                         hide_fully_completed_tags: self.hide_fully_completed_tags,
+                        hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
                         allow_insecure_certs: self.ob_insecure,
                         tag_aliases: self.tag_aliases.clone(),
                         sort_cutoff_months: self.sort_cutoff_months,
@@ -803,6 +810,23 @@ impl GuiApp {
                         }
                     }
                 }
+                Task::none()
+            }
+            Message::ToggleCalendarVisibility(href, is_visible) => {
+                if is_visible {
+                    self.hidden_calendars.remove(&href);
+                } else {
+                    self.hidden_calendars.insert(href);
+                }
+                // Save immediately so it persists
+                self.save_config();
+                // Refresh main view if we just hid the active calendar
+                if let Some(active) = &self.active_cal_href {
+                    if self.hidden_calendars.contains(active) {
+                        self.active_cal_href = None;
+                    }
+                }
+                self.refresh_filtered_tasks();
                 Task::none()
             }
         }
