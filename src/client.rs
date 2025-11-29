@@ -157,15 +157,17 @@ impl RustyClient {
             && let Some(found) = calendars
                 .iter()
                 .find(|c| c.name == *def_cal || c.href == *def_cal)
-            {
-                active_href = Some(found.href.clone());
-            }
+        {
+            active_href = Some(found.href.clone());
+        }
 
         // Only try discovery if we are online and explicit default failed
-        if active_href.is_none() && warning.is_none()
-            && let Ok(href) = client.discover_calendar().await {
-                active_href = Some(href);
-            }
+        if active_href.is_none()
+            && warning.is_none()
+            && let Ok(href) = client.discover_calendar().await
+        {
+            active_href = Some(href);
+        }
 
         // 4. Fetch Tasks (only if online)
         // If offline, we return empty list here. The UI (GUI/TUI) is responsible
@@ -264,9 +266,10 @@ impl RustyClient {
                         content.etag,
                         item.href,
                         calendar_href.to_string(),
-                    ) {
-                        tasks.push(task);
-                    }
+                    )
+                {
+                    tasks.push(task);
+                }
             }
             Ok(tasks)
         } else {
@@ -486,7 +489,6 @@ impl RustyClient {
         }
         Ok(success_count)
     }
-
     pub async fn sync_journal(&self) -> Result<(), String> {
         let mut journal = Journal::load();
         if journal.is_empty() {
@@ -494,8 +496,15 @@ impl RustyClient {
         }
 
         if let Some(client) = &self.client {
-            while let Some(action) = journal.peek_front() {
-                let result = match action {
+            // Process queue
+            while !journal.is_empty() {
+                // Get a mutable reference to the first action
+                let action = &mut journal.queue[0];
+                
+                let mut should_pop = false;
+                let mut fatal_error = None;
+
+                match action {
                     Action::Create(task) => {
                         let filename = format!("{}.ics", task.uid);
                         let full_href = if task.calendar_href.ends_with('/') {
@@ -504,37 +513,102 @@ impl RustyClient {
                             format!("{}/{}", task.calendar_href, filename)
                         };
                         let bytes = task.to_ics().as_bytes().to_vec();
-                        client
-                            .create_resource(&full_href, bytes, b"text/calendar")
-                            .await
-                            .map(|_| ())
+                        
+                        match client.create_resource(&full_href, bytes, b"text/calendar").await {
+                            Ok(_) => should_pop = true,
+                            Err(e) => {
+                                let err_s = format!("{:?}", e);
+                                if err_s.contains("412") || err_s.contains("PreconditionFailed") {
+                                    should_pop = true; 
+                                } else {
+                                    fatal_error = Some(err_s);
+                                }
+                            }
+                        }
                     }
                     Action::Update(task) => {
                         let bytes = task.to_ics().as_bytes().to_vec();
-                        client
-                            .update_resource(
+                        match client.update_resource(
                                 &task.href,
-                                bytes,
+                                bytes.clone(),
                                 &task.etag,
                                 b"text/calendar; charset=utf-8; component=VTODO",
-                            )
-                            .await
-                            .map(|_| ())
-                    }
-                    Action::Delete(task) => client.delete(&task.href, &task.etag).await,
-                };
-
-                match result {
-                    Ok(_) => {
-                        if let Err(e) = journal.pop_front() {
-                            eprintln!("Failed to pop journal: {}", e);
-                            break;
+                            ).await 
+                        {
+                            Ok(_) => should_pop = true,
+                            Err(e) => {
+                                let err_s = format!("{:?}", e);
+                                if err_s.contains("412") || err_s.contains("PreconditionFailed") {
+                                    println!("412 Conflict on Update. Fetching fresh ETag...");
+                                    
+                                    if let Ok(fresh_vec) = client.get_calendar_resources(&task.calendar_href, &[task.href.clone()]).await 
+                                       && let Some(fresh_item) = fresh_vec.first() 
+                                    {
+                                        // CORRECTED: Check inside the content Result
+                                        if let Ok(content) = &fresh_item.content {
+                                            println!("Fresh ETag found: {}. Retrying...", content.etag);
+                                            
+                                            // 2. Update local ETag
+                                            task.etag = content.etag.clone();
+                                            
+                                            // 3. Retry immediately with Last-Write-Wins (our bytes, new ETag)
+                                            let _ = client.update_resource(
+                                                &task.href,
+                                                bytes, 
+                                                &task.etag, 
+                                                b"text/calendar; charset=utf-8; component=VTODO"
+                                            ).await;
+                                            
+                                            should_pop = true;
+                                        } else {
+                                            // Resource likely deleted on server (content is Err)
+                                            should_pop = true;
+                                        }
+                                    } else {
+                                        // Could not fetch (404?), so it's gone.
+                                        should_pop = true;
+                                    }
+                                } else if err_s.contains("404") {
+                                    should_pop = true;
+                                } else {
+                                    fatal_error = Some(err_s);
+                                }
+                            }
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Journal Sync failed: {:?}", e);
-                        break;
+                    Action::Delete(task) => {
+                        match client.delete(&task.href, &task.etag).await {
+                            Ok(_) => should_pop = true,
+                            Err(e) => {
+                                let err_s = format!("{:?}", e);
+                                if err_s.contains("404") {
+                                    should_pop = true;
+                                } else if err_s.contains("412") || err_s.contains("PreconditionFailed") {
+                                     if let Ok(fresh_vec) = client.get_calendar_resources(&task.calendar_href, &[task.href.clone()]).await 
+                                       && let Some(fresh_item) = fresh_vec.first() 
+                                    {
+                                        // CORRECTED: Check inside the content Result
+                                        if let Ok(content) = &fresh_item.content {
+                                            // Retry Delete with new ETag
+                                            let _ = client.delete(&task.href, &content.etag).await;
+                                        }
+                                        should_pop = true;
+                                    } else {
+                                        should_pop = true;
+                                    }
+                                } else {
+                                    fatal_error = Some(err_s);
+                                }
+                            }
+                        }
                     }
+                }
+
+                if should_pop {
+                    let _ = journal.pop_front(); 
+                } else {
+                    eprintln!("Journal Sync Paused: {}", fatal_error.unwrap_or_default());
+                    break;
                 }
             }
         }

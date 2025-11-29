@@ -847,7 +847,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             }
         ]
         .spacing(6)
-        .align_y(iced::Alignment::Center) // <--- ADD THIS LINE
+        .align_y(iced::Alignment::Center)
     } else {
         row![
             text(&task.summary)

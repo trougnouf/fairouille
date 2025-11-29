@@ -14,7 +14,7 @@ pub enum Action {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Journal {
-    queue: Vec<Action>,
+    pub queue: Vec<Action>,
 }
 
 impl Journal {
@@ -33,9 +33,10 @@ impl Journal {
         if let Some(path) = Self::get_path()
             && path.exists()
             && let Ok(content) = fs::read_to_string(path)
-                && let Ok(journal) = serde_json::from_str(&content) {
-                    return journal;
-                }
+            && let Ok(journal) = serde_json::from_str(&content)
+        {
+            return journal;
+        }
         Self::default()
     }
 
