@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2] - 2025-11-29
+
+### 🐛 Bug Fixes
+
+- *(sync)* Handle 412 Precondition Failed by refreshing ETag and retrying
+
+### 🎨 Styling
+
+- [GUI] align tags with titles
+
+### ⚙️ Miscellaneous Tasks
+
+- Lint
 ## [0.2.1] - 2025-11-29
 
 ### 🚀 Features
