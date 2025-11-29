@@ -25,23 +25,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 
-      # Run Tests
+      # 2. Run Tests
       - name: Run Unit Tests
         run: cargo test --verbose
 
-      # 2. Install Packaging Tools
+      # 3. Install Packaging Tools
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
-      # 3. Build Release Binaries (Standard)
+      # 4. Build Release Binaries (Standard)
       - name: Build Release
         run: cargo build --release --features gui
 
-      # 4. Build Debian Package (.deb)
+      # 5. Build Debian Package (.deb)
       - name: Build Deb
         run: cargo deb --no-build --features gui 
 
-      # 5. Package Generic Linux Tarball
+      # 6. Package Generic Linux Tarball
       - name: Create Archive
         run: |
           STAGING="cfait-${{ github.ref_name }}"
@@ -59,14 +59,25 @@ jobs:
           # Compress
           tar -czvf "cfait-linux-${{ github.ref_name }}.tar.gz" "$STAGING"
 
+      # 7. Generate Changelog (Manual Binary Install to fix Docker error)
       - name: Generate Changelog
-        uses: orhun/git-cliff-action@v3
-        with:
-          config: cliff.toml
-          args: --verbose --latest --strip header
-          output: CHANGELOG_RELEASE.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Download the latest git-cliff release asset for Linux
+          gh release download --repo orhun/git-cliff --pattern '*x86_64-unknown-linux-gnu.tar.gz'
 
-      # 6. Publish to GitHub Releases
+          # Extract the archive
+          tar -xf git-cliff-*.tar.gz
+
+          # Move the binary to the current directory and make it executable
+          mv git-cliff-*/git-cliff .
+          chmod +x ./git-cliff
+
+          # Run git-cliff to generate the changelog
+          ./git-cliff --config cliff.toml --verbose --latest --strip header --output CHANGELOG_RELEASE.md
+
+      # 8. Publish to GitHub Releases
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')

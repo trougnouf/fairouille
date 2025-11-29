@@ -1,3 +1,31 @@
+# Changelog
+
+## [0.2.1] - 2025-11-29
+
+### 🚀 Features
+
+- *(security)* Implement secure TLS with insecure toggle and improve connection UX
+- *(config)* Add setting to hide specific calendars from view
+- *(core)* Implement moving tasks between calendars in GUI and TUI
+- *(core)* Introduce a local-only calendar with an option to migrate tasks to a CalDAV server
+- *(journaling)* Implement offline task queue and UI indicators
+- *(gui)* Embed Symbols Nerd Font, iconify UI and compact task-row layout
+
+### 📚 Documentation
+
+- Replace #urgent with !<4 in Advanced search example
+- Installation instructions (Arch, deb, Windows, generic-Linux, Rust crate)
+- Update README
+
+### 🎨 Styling
+
+- *(gui)* Overhaul task row with a space-saving layout
+
+### ⚙️ Miscellaneous Tasks
+
+- Lint
+- Auto-add changelog to release notes
+- Release cfait version 0.2.1
 ## [0.2.0] - 2025-11-27
 
 ### 💼 Other
@@ -18,6 +46,8 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Automate changelog with git-cliff
+- *(release)* Update changelog for v"${TAG}"
+- Release cfait version 0.2.0
 ## [0.1.9] - 2025-11-26
 
 ### 💼 Other

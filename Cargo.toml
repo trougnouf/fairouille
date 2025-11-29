@@ -1,6 +1,6 @@
 [package]
 name = "cfait"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A simple, elegant, and lightweight CalDAV task manager (TUI & GUI)"
 license = "GPL-3.0"
