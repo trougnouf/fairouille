@@ -21,6 +21,8 @@ pub enum Action {
     Quit,
     MoveTask(Task, String), // Task, New Calendar Href
     MigrateLocal(String),   // target_href
+    ToggleCalendarVisibility(String),
+    IsolateCalendar(String),
 }
 
 #[derive(Debug)]

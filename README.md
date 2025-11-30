@@ -110,9 +110,9 @@ allow_insecure_certs = true
 
 default_calendar = "Personal" # Optional: Auto-selects this list on startup
 
-# Optional: Hide calendars you don't want to see (e.g., those without VTASKS capability).
+# Optional: Disable calendars you don't want to see (e.g., those without VTASKS capability).
 # Use the full calendar href, not the display name.
-#hidden_calendars = [
+#disabled_calendars = [
 #    "/trougnouf/1355814b-9f29-792d-6dba-f6c671304517/",
 #    "/trougnouf/36df9c8c-98e8-a920-7866-7b9d39bd8a24/",
 #]
@@ -139,6 +139,12 @@ cfait = ["dev", "rust"]           # Typing #cfait will add #cfait, #dev and #rus
 | :--- | :--- | :--- |
 | **Global** | `Tab` | Switch focus (Tasks ↔ Sidebar) |
 | | `q` | Quit |
+**Sidebar (Cals)** | `Enter` | **Set Target** (Add to view) |
+| | `Right` | **Focus** (Set Target + Hide others) |
+  | | `Space` | **Toggle Visibility** (Show/Hide layer) |
+| | `*` | **Toggle All** (Show all / Hide others) |
+| **Sidebar (Tags)** | `Enter` | Toggle Tag Filter |
+| | `m` | Toggle Tag Match Mode (AND / OR) |
 | **Task List** | `j` / `k` | Move Down / Up |
 | | `Space` | **Toggle** Completion |
 | | `s` | **Start / Pause** (Mark In-Process) |

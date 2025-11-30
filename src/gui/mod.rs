@@ -80,6 +80,7 @@ impl GuiApp {
             hide_fully_completed_tags: self.hide_fully_completed_tags,
             allow_insecure_certs: self.ob_insecure,
             hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
+            disabled_calendars: self.disabled_calendars.iter().cloned().collect(),
             tag_aliases: self.tag_aliases.clone(),
             sort_cutoff_months: self.sort_cutoff_months,
         }
@@ -88,11 +89,7 @@ impl GuiApp {
 
     // Helper to re-run filters
     fn refresh_filtered_tasks(&mut self) {
-        let cal_filter = if self.sidebar_mode == SidebarMode::Categories {
-            None
-        } else {
-            self.active_cal_href.as_deref()
-        };
+        let cal_filter = None;
 
         let cutoff_date = if let Some(months) = self.sort_cutoff_months {
             // Basic calculation: Current UTC + Months * 30 Days
@@ -122,12 +119,19 @@ impl GuiApp {
             Message::FontLoaded(_) => Task::none(), // Just consume the event
             Message::ConfigLoaded(Ok(config)) => {
                 self.hidden_calendars = config.hidden_calendars.clone().into_iter().collect();
+                self.disabled_calendars = config.disabled_calendars.clone().into_iter().collect();
                 self.sort_cutoff_months = config.sort_cutoff_months;
                 self.ob_sort_months_input = match config.sort_cutoff_months {
                     Some(m) => m.to_string(),
                     None => "".to_string(),
                 };
                 self.ob_insecure = config.allow_insecure_certs;
+
+                // Populate fields so save_config() doesn't wipe them
+                self.ob_url = config.url.clone();
+                self.ob_user = config.username.clone();
+                self.ob_pass = config.password.clone();
+                self.ob_default_cal = config.default_calendar.clone();
 
                 self.state = AppState::Loading;
                 Task::perform(connect_and_fetch_wrapper(config), Message::Loaded)
@@ -174,6 +178,7 @@ impl GuiApp {
                     default_calendar: None,
                     allow_insecure_certs: false,
                     hidden_calendars: Vec::new(),
+                    disabled_calendars: Vec::new(),
                     hide_completed: self.hide_completed,
                     hide_fully_completed_tags: self.hide_fully_completed_tags,
                     tag_aliases: self.tag_aliases.clone(), // Use in-memory aliases if any
@@ -188,6 +193,8 @@ impl GuiApp {
                 config_to_save.default_calendar = self.ob_default_cal.clone();
                 config_to_save.allow_insecure_certs = self.ob_insecure;
                 config_to_save.hidden_calendars = self.hidden_calendars.iter().cloned().collect();
+                config_to_save.disabled_calendars =
+                    self.disabled_calendars.iter().cloned().collect();
                 config_to_save.hide_completed = self.hide_completed;
                 config_to_save.hide_fully_completed_tags = self.hide_fully_completed_tags;
                 config_to_save.tag_aliases = self.tag_aliases.clone();
@@ -248,6 +255,7 @@ impl GuiApp {
                     default_calendar: None,
                     allow_insecure_certs: false,
                     hidden_calendars: Vec::new(),
+                    disabled_calendars: Vec::new(),
                     hide_completed: self.hide_completed,
                     hide_fully_completed_tags: self.hide_fully_completed_tags,
                     tag_aliases: self.tag_aliases.clone(),
@@ -275,6 +283,64 @@ impl GuiApp {
                 Task::none()
             }
 
+            Message::ToggleAllCalendars(show_all) => {
+                if show_all {
+                    // Show everything (that isn't disabled)
+                    self.hidden_calendars.clear();
+                } else {
+                    // Hide everything (except the active target)
+                    for cal in &self.calendars {
+                        // If it's the active target, don't hide it
+                        if self.active_cal_href.as_ref() != Some(&cal.href) {
+                            self.hidden_calendars.insert(cal.href.clone());
+                        }
+                    }
+                }
+                self.save_config();
+                self.refresh_filtered_tasks();
+
+                // If showing all, we should probably ensure data is fetched?
+                // Relying on Refresh or lazy fetch. For now, we update the view filter.
+                // Ideally trigger a fetch if we have an efficient batch fetch.
+                // Triggering a full refresh is safest to ensure all data is present:
+                return Task::perform(async { Ok::<(), String>(()) }, |_| Message::Refresh);
+            }
+            Message::IsolateCalendar(href) => {
+                if self.sidebar_mode == SidebarMode::Categories {
+                    self.sidebar_mode = SidebarMode::Calendars;
+                }
+
+                // 1. Set as Target
+                self.active_cal_href = Some(href.clone());
+
+                // 2. Hide ALL others
+                self.hidden_calendars.clear(); // Clear first to be clean
+                for cal in &self.calendars {
+                    if cal.href != href {
+                        self.hidden_calendars.insert(cal.href.clone());
+                    }
+                }
+
+                // 3. Ensure this one is visible (and enabled)
+                if self.disabled_calendars.contains(&href) {
+                    self.disabled_calendars.remove(&href);
+                }
+
+                self.save_config();
+                self.refresh_filtered_tasks();
+
+                // 4. Fetch
+                if let Some(client) = &self.client {
+                    if !self.store.calendars.contains_key(&href) {
+                        self.loading = true;
+                    }
+                    return Task::perform(
+                        async_fetch_wrapper(client.clone(), href),
+                        Message::TasksRefreshed,
+                    );
+                }
+                Task::none()
+            }
             Message::Loaded(Ok((client, mut cals, tasks, mut active, warning))) => {
                 self.client = Some(client.clone());
 
@@ -342,6 +408,7 @@ impl GuiApp {
                     self.hide_completed = cfg.hide_completed;
                     self.hide_fully_completed_tags = cfg.hide_fully_completed_tags;
                     self.tag_aliases = cfg.tag_aliases;
+                    self.disabled_calendars = cfg.disabled_calendars.into_iter().collect();
                 }
 
                 // Auto-save successful connection params
@@ -355,6 +422,7 @@ impl GuiApp {
                         hide_fully_completed_tags: self.hide_fully_completed_tags,
                         allow_insecure_certs: self.ob_insecure,
                         hidden_calendars: self.hidden_calendars.iter().cloned().collect(),
+                        disabled_calendars: self.disabled_calendars.iter().cloned().collect(),
                         tag_aliases: self.tag_aliases.clone(),
                         sort_cutoff_months: self.sort_cutoff_months,
                     }
@@ -459,8 +527,16 @@ impl GuiApp {
                     self.sidebar_mode = SidebarMode::Calendars;
                 }
                 self.active_cal_href = Some(href.clone());
-                self.refresh_filtered_tasks(); // Instant switch using current Store data (Cache)
 
+                // LOGIC CHECK: If selecting as target, ensure it is visible
+                if self.hidden_calendars.contains(&href) {
+                    self.hidden_calendars.remove(&href);
+                    self.save_config();
+                }
+
+                self.refresh_filtered_tasks();
+
+                // Fetch logic remains the same...
                 if let Some(client) = &self.client {
                     // Don't set loading=true if we have cached data to show immediately!
                     // This makes the UI feel snappier.
@@ -473,6 +549,20 @@ impl GuiApp {
                         Message::TasksRefreshed,
                     );
                 }
+                Task::none()
+            }
+            Message::ToggleCalendarDisabled(href, is_disabled) => {
+                if is_disabled {
+                    self.disabled_calendars.insert(href.clone());
+                    // If we disable the active write target, unset it
+                    if self.active_cal_href.as_ref() == Some(&href) {
+                        self.active_cal_href = None;
+                    }
+                } else {
+                    self.disabled_calendars.remove(&href);
+                }
+                self.save_config();
+                self.refresh_filtered_tasks();
                 Task::none()
             }
             Message::SearchChanged(val) => {
@@ -952,19 +1042,17 @@ impl GuiApp {
                 Task::none()
             }
             Message::ToggleCalendarVisibility(href, is_visible) => {
+                // LOGIC CHECK: Cannot hide the currently active write target
+                if !is_visible && self.active_cal_href.as_ref() == Some(&href) {
+                    return Task::none();
+                }
+
                 if is_visible {
                     self.hidden_calendars.remove(&href);
                 } else {
                     self.hidden_calendars.insert(href);
                 }
-                // Save immediately so it persists
                 self.save_config();
-                // Refresh main view if we just hid the active calendar
-                if let Some(active) = &self.active_cal_href
-                    && self.hidden_calendars.contains(active)
-                {
-                    self.active_cal_href = None;
-                }
                 self.refresh_filtered_tasks();
                 Task::none()
             }

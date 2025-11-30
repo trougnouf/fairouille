@@ -39,6 +39,7 @@ pub struct AppState {
     pub sidebar_mode: SidebarMode,
     pub active_cal_href: Option<String>,
     pub hidden_calendars: HashSet<String>,
+    pub disabled_calendars: HashSet<String>,
     pub selected_categories: HashSet<String>,
     pub match_all_categories: bool,
     pub hide_completed: bool,
@@ -88,6 +89,7 @@ impl AppState {
             sidebar_mode: SidebarMode::Calendars,
             active_cal_href: None,
             hidden_calendars: HashSet::new(),
+            disabled_calendars: HashSet::new(),
             selected_categories: HashSet::new(),
             match_all_categories: false,
             hide_completed: false,
@@ -108,12 +110,15 @@ impl AppState {
         }
     }
 
+    pub fn get_filtered_calendars(&self) -> Vec<&CalendarListEntry> {
+        self.calendars
+            .iter()
+            .filter(|c| !self.disabled_calendars.contains(&c.href))
+            .collect()
+    }
+
     pub fn refresh_filtered_view(&mut self) {
-        let cal_filter = if self.sidebar_mode == SidebarMode::Categories {
-            None
-        } else {
-            self.active_cal_href.as_deref()
-        };
+        let cal_filter = None;
 
         let search_term = if self.mode == InputMode::Searching {
             &self.input_buffer
@@ -129,11 +134,14 @@ impl AppState {
             None
         };
 
+        let mut effective_hidden = self.hidden_calendars.clone();
+        effective_hidden.extend(self.disabled_calendars.clone());
+
         self.tasks = self.store.filter(FilterOptions {
             active_cal_href: cal_filter,
             selected_categories: &self.selected_categories,
             match_all_categories: self.match_all_categories,
-            hidden_calendars: &self.hidden_calendars,
+            hidden_calendars: &effective_hidden,
             search_term,
             hide_completed_global: self.hide_completed,
             cutoff_date,

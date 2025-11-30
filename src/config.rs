@@ -25,7 +25,10 @@ pub struct Config {
     pub allow_insecure_certs: bool,
 
     #[serde(default)]
-    pub hidden_calendars: Vec<String>,
+    pub hidden_calendars: Vec<String>, // Transient (Layers)
+
+    #[serde(default)]
+    pub disabled_calendars: Vec<String>, // Permanent (Availability)
 
     #[serde(default)]
     pub hide_completed: bool,

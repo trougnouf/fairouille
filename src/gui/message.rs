@@ -21,6 +21,7 @@ pub enum Message {
     ObPassChanged(String),
     ObInsecureToggled(bool),
     ToggleCalendarVisibility(String, bool), // (href, is_visible)
+    ToggleCalendarDisabled(String, bool),
     ObDefaultCalChanged(String),
     ObSubmit,
     OpenSettings,
@@ -55,6 +56,7 @@ pub enum Message {
 
     SidebarModeChanged(SidebarMode),
     SelectCalendar(String),
+    IsolateCalendar(String),
     CategoryToggled(String),
     CategoryMatchModeChanged(bool),
     RefreshedAll(Result<Vec<(String, Vec<TodoTask>)>, String>),
@@ -85,4 +87,5 @@ pub enum Message {
     MigrationComplete(Result<usize, String>),
     FontLoaded(Result<(), String>),
     DismissError,
+    ToggleAllCalendars(bool),
 }

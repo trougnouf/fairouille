@@ -39,14 +39,30 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             let items: Vec<ListItem> = state
                 .calendars
                 .iter()
-                .filter(|c| !state.hidden_calendars.contains(&c.href))
+                .filter(|c| !state.disabled_calendars.contains(&c.href))
                 .map(|c| {
-                    let prefix = if Some(&c.href) == state.active_cal_href.as_ref() {
-                        "* "
+                    let is_target = Some(&c.href) == state.active_cal_href.as_ref();
+                    let is_visible = !state.hidden_calendars.contains(&c.href);
+
+                    let prefix = if is_target { ">" } else { " " };
+                    let check = if is_visible { "[x]" } else { "[ ]" };
+
+                    let color = if is_target {
+                        Color::Yellow
                     } else {
-                        "  "
+                        Color::White
                     };
-                    ListItem::new(Line::from(format!("{}{}", prefix, c.name)))
+
+                    let style = if is_target {
+                        Style::default().fg(color).add_modifier(Modifier::BOLD)
+                    } else if !is_visible {
+                        Style::default().fg(Color::DarkGray)
+                    } else {
+                        Style::default().fg(color)
+                    };
+
+                    ListItem::new(Line::from(format!("{} {} {}", prefix, check, c.name)))
+                        .style(style)
                 })
                 .collect();
             (" Calendars [1] ".to_string(), items)
@@ -205,7 +221,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         .highlight_style(
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .bg(Color::Blue), // <--- Fixed color
+                .bg(Color::DarkGray),
         );
     f.render_stateful_widget(task_list, main_chunks[0], &mut state.list_state);
 
@@ -281,24 +297,31 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
             let help_str = match state.active_focus {
                 Focus::Sidebar => match state.sidebar_mode {
-                    SidebarMode::Calendars => "Enter:Select | 2:Tags".to_string(),
+                    // Sidebar Context
+                    SidebarMode::Calendars => {
+                        "Ret:Target Spc:Toggle *:All →:Solo Tab:Tasks q:Quit".to_string()
+                    }
                     SidebarMode::Categories => {
-                        "Enter:Toggle | m:Match(AND/OR) | 1:Cals".to_string()
+                        "Ret:Toggle m:Match(AND/OR) 1:Cals Tab:Tasks".to_string()
                     }
                 },
                 Focus::Main => {
-                    let mut s =
-                        "/:Find | a:Add | e:Edit | E:Desc | M:Move | d:Del | y:Yank | r:Sync"
-                            .to_string();
-                    // Conditionally show 'X:Export'
-                    if state.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
-                        s.push_str(" | X:Export");
-                    }
-                    // Only show Block/Child if something is in the clipboard
+                    // Main Context - Split into common and advanced if needed,
+                    // but here is a compact comprehensive list.
+                    let mut s = "a:Add e:Edit Spc:Done x:Cancel d:Del /:Find".to_string();
+
+                    // Contextual actions appear only when relevant to save space
                     if state.yanked_uid.is_some() {
-                        s.push_str(" | b:Block | c:Child");
+                        s.push_str(" b:Block c:Child");
+                    } else {
+                        s.push_str(" y:Yank");
                     }
-                    s.push_str(" | H:Hide");
+
+                    if state.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
+                        s.push_str(" X:Export");
+                    }
+
+                    s.push_str(" M:Move r:Sync Tab:Side q:Quit");
                     s
                 }
             };

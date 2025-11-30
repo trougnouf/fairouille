@@ -7,6 +7,7 @@ use crate::store::UNCATEGORIZED_ID;
 
 use iced::widget::{
     Rule, button, checkbox, column, container, horizontal_space, row, scrollable, text, text_input,
+    toggler,
 };
 use iced::{Background, Color, Element, Length, Theme};
 
@@ -126,29 +127,62 @@ fn view_sidebar(app: &GuiApp) -> Element<'_, Message> {
 }
 
 fn view_sidebar_calendars(app: &GuiApp) -> Element<'_, Message> {
-    column(
+    // 1. Calculate "Select All" state
+    let are_all_visible = app
+        .calendars
+        .iter()
+        .filter(|c| !app.disabled_calendars.contains(&c.href))
+        .all(|c| !app.hidden_calendars.contains(&c.href));
+
+    let toggle_all = toggler(are_all_visible)
+        .label("Show All")
+        .text_size(12) // Tiny bit smaller
+        .text_alignment(iced::alignment::Horizontal::Left)
+        .spacing(10)
+        .width(Length::Fill)
+        .on_toggle(Message::ToggleAllCalendars);
+
+    // Wrap in container for padding
+    let toggle_container = container(toggle_all).padding(5);
+
+    let list = column(
         app.calendars
             .iter()
-            .filter(|c| !app.hidden_calendars.contains(&c.href))
+            .filter(|c| !app.disabled_calendars.contains(&c.href)) // Filter directly here
             .map(|cal| {
-                let is_active = app.active_cal_href.as_ref() == Some(&cal.href);
-                let btn = button(text(&cal.name).size(16))
-                    .padding(10)
+                let is_visible = !app.hidden_calendars.contains(&cal.href);
+                let is_target = app.active_cal_href.as_ref() == Some(&cal.href);
+
+                let check = checkbox("", is_visible)
+                    .on_toggle(move |v| Message::ToggleCalendarVisibility(cal.href.clone(), v));
+
+                let mut label = button(text(&cal.name).size(16))
                     .width(Length::Fill)
+                    .padding(10)
                     .on_press(Message::SelectCalendar(cal.href.clone()));
 
-                if is_active {
-                    btn.style(button::primary)
+                label = if is_target {
+                    label.style(button::primary)
                 } else {
-                    btn.style(button::secondary)
-                }
-                .into()
+                    label.style(button::text)
+                };
+
+                let focus_btn = button(icon::icon(icon::ARROW_RIGHT).size(14))
+                    .style(button::text)
+                    .padding(10)
+                    .on_press(Message::IsolateCalendar(cal.href.clone()));
+
+                row![check, label, focus_btn] // Added focus_btn
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center)
+                    .into()
             })
             .collect::<Vec<_>>(),
     )
-    .spacing(10)
-    .width(Length::Fill)
-    .into()
+    .spacing(5)
+    .width(Length::Fill);
+
+    column![toggle_container, list].spacing(5).into()
 }
 
 fn view_sidebar_categories(app: &GuiApp) -> Element<'_, Message> {
@@ -345,7 +379,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
         let targets: Vec<_> = app
             .calendars
             .iter()
-            .filter(|c| c.href != LOCAL_CALENDAR_HREF && !app.hidden_calendars.contains(&c.href))
+            .filter(|c| c.href != LOCAL_CALENDAR_HREF && !app.disabled_calendars.contains(&c.href))
             .collect();
 
         if !targets.is_empty() {
@@ -430,13 +464,21 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
 
 fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
     let input_placeholder = if app.editing_uid.is_some() {
-        "Edit Title..."
+        "Edit Title...".to_string()
     } else {
-        "Add task (Buy cat food !1 @weekly #groceries ~30m)..."
+        // Show which calendar we are writing to
+        let target_name = app
+            .calendars
+            .iter()
+            .find(|c| Some(&c.href) == app.active_cal_href.as_ref())
+            .map(|c| c.name.as_str())
+            .unwrap_or("Default");
+
+        format!("Add task to '{}' (!1 @tomorrow #tag)...", target_name)
     };
 
     // 1. Main Text Input
-    let input_title = text_input(input_placeholder, &app.input_value)
+    let input_title = text_input(&input_placeholder, &app.input_value)
         .on_input(Message::InputChanged)
         .on_submit(Message::SubmitTask)
         .padding(10)
@@ -480,7 +522,9 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
             let targets: Vec<_> = app
                 .calendars
                 .iter()
-                .filter(|c| c.href != task.calendar_href && !app.hidden_calendars.contains(&c.href))
+                .filter(|c| {
+                    c.href != task.calendar_href && !app.disabled_calendars.contains(&c.href)
+                })
                 .collect();
 
             if !targets.is_empty() {
@@ -968,7 +1012,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             let targets: Vec<_> = app
                 .calendars
                 .iter()
-                .filter(|c| c.href != current_cal_href && !app.hidden_calendars.contains(&c.href))
+                .filter(|c| c.href != current_cal_href && !app.disabled_calendars.contains(&c.href))
                 .collect();
 
             let move_label = text("Move to:")
@@ -1137,10 +1181,13 @@ fn view_settings(app: &GuiApp) -> Element<'_, Message> {
         let mut col = column![text("Manage Calendars").size(20)].spacing(10);
 
         for cal in &app.calendars {
-            let is_visible = !app.hidden_calendars.contains(&cal.href);
+            // Logic inverted: Checkbox checked = Enabled (!Disabled)
+            let is_enabled = !app.disabled_calendars.contains(&cal.href);
+
             let row_content = row![
-                checkbox(&cal.name, is_visible)
-                    .on_toggle(move |v| Message::ToggleCalendarVisibility(cal.href.clone(), v))
+                checkbox(&cal.name, is_enabled)
+                    // When toggled, we send !v because the msg is "ToggleDisabled"
+                    .on_toggle(move |v| Message::ToggleCalendarDisabled(cal.href.clone(), !v))
                     .width(Length::Fill)
             ];
 

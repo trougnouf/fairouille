@@ -54,7 +54,8 @@ pub async fn run() -> Result<()> {
         tag_aliases,
         sort_cutoff,
         allow_insecure,
-        hidden_calendars, // <--- This is the 10th element
+        hidden_calendars,
+        disabled_calendars,
     ) = match config_result {
         Ok(cfg) => (
             cfg.url,
@@ -66,7 +67,8 @@ pub async fn run() -> Result<()> {
             cfg.tag_aliases,
             cfg.sort_cutoff_months,
             cfg.allow_insecure_certs,
-            cfg.hidden_calendars, // <--- This matches
+            cfg.hidden_calendars,
+            cfg.disabled_calendars,
         ),
         Err(_) => {
             let path_str = match config::Config::get_path_string() {
@@ -95,14 +97,60 @@ pub async fn run() -> Result<()> {
     app_state.tag_aliases = tag_aliases;
     app_state.sort_cutoff_months = sort_cutoff;
     app_state.hidden_calendars = hidden_calendars.into_iter().collect();
+    app_state.disabled_calendars = disabled_calendars.into_iter().collect();
 
     let (action_tx, mut action_rx) = mpsc::channel(10);
     let (event_tx, mut event_rx) = mpsc::channel(10);
 
     // --- NETWORK THREAD ---
     tokio::spawn(async move {
-        // Create Client (Unified Repository)
-        // If credentials are empty, RustyClient creates an offline client automatically.
+        // ------------------------------------------------------------------
+        // 0. LOAD CACHE IMMEDIATELY (Fixes "Sync First" delay)
+        // ------------------------------------------------------------------
+        if let Ok(mut cached_cals) = Cache::load_calendars() {
+            // Inject Local
+            let local_cal = CalendarListEntry {
+                name: LOCAL_CALENDAR_NAME.to_string(),
+                href: LOCAL_CALENDAR_HREF.to_string(),
+                color: None,
+            };
+            // Dedup local check
+            if !cached_cals.iter().any(|c| c.href == LOCAL_CALENDAR_HREF) {
+                cached_cals.push(local_cal);
+            }
+
+            // Update UI with Calendars
+            let _ = event_tx
+                .send(AppEvent::CalendarsLoaded(cached_cals.clone()))
+                .await;
+
+            // Load tasks for these calendars
+            let mut cached_tasks = Vec::new();
+
+            // Load Local Storage
+            if let Ok(local_t) = LocalStorage::load() {
+                cached_tasks.push((LOCAL_CALENDAR_HREF.to_string(), local_t));
+            }
+
+            // Load Remote Cache
+            for cal in &cached_cals {
+                if cal.href != LOCAL_CALENDAR_HREF {
+                    if let Ok(t) = Cache::load(&cal.href) {
+                        cached_tasks.push((cal.href.clone(), t));
+                    }
+                }
+            }
+
+            if !cached_tasks.is_empty() {
+                let _ = event_tx.send(AppEvent::TasksLoaded(cached_tasks)).await;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 1. CONNECT & SYNC
+        // ------------------------------------------------------------------
+
+        // Create Client
         let client = match RustyClient::new(&url, &user, &pass, allow_insecure) {
             Ok(c) => c,
             Err(e) => {
@@ -114,43 +162,29 @@ pub async fn run() -> Result<()> {
             .send(AppEvent::Status("Connecting...".to_string()))
             .await;
 
-        // A. Fetch Calendars (Network)
-        // This will be empty if offline or if network fails non-fatally
+        // A. Fetch Calendars
         let mut calendars = match client.get_calendars().await {
             Ok(cals) => cals,
             Err(e) => {
                 let err_str = e.to_string();
                 if err_str.contains("InvalidCertificate") {
-                    // This is a FATAL configuration error. Build the helpful message and stop.
                     let mut helpful_msg =
                         "Connection failed: The server presented an invalid TLS/SSL certificate."
                             .to_string();
-
-                    // --- START OF MISSING CODE ---
                     let config_advice = format!(
                         "\n\nTo fix this, please edit your config file:\n  {}",
                         crate::config::Config::get_path_string()
                             .unwrap_or_else(|_| "path unknown".to_string())
                     );
-
                     if !allow_insecure {
                         helpful_msg.push_str(
-                            "\nIf this is a self-hosted server (like Radicale), try setting 'allow_insecure_certs = true' in your config.",
-                        );
-                    } else {
-                        helpful_msg.push_str(
-                            "\nEven with 'allow_insecure_certs = true', the certificate is invalid. Please check your server's TLS/SSL configuration.",
+                            "\nIf this is a self-hosted server, set 'allow_insecure_certs = true'.",
                         );
                     }
                     helpful_msg.push_str(&config_advice);
-                    helpful_msg.push_str(&format!("\n\nDetails: {}", err_str));
-
                     let _ = event_tx.send(AppEvent::Error(helpful_msg)).await;
                     return;
-                    // --- END OF MISSING CODE ---
                 } else {
-                    // This is a non-fatal network error (e.g., timeout, DNS fail).
-                    // We can proceed in offline mode. Send a status update and return an empty list.
                     let _ = event_tx
                         .send(AppEvent::Status(format!("Sync warning: {}", err_str)))
                         .await;
@@ -171,27 +205,23 @@ pub async fn run() -> Result<()> {
             .send(AppEvent::CalendarsLoaded(calendars.clone()))
             .await;
 
-        // C. Fetch All Tasks (Smart Fetch)
-        // 1. Load Disk Cache for Network Cals (Performance)
-        let mut cached_results = Vec::new();
-        for cal in &calendars {
-            if cal.href != LOCAL_CALENDAR_HREF
-                && let Ok(tasks) = Cache::load(&cal.href) {
-                    cached_results.push((cal.href.clone(), tasks));
-                }
-        }
-        if !cached_results.is_empty() {
-            let _ = event_tx.send(AppEvent::TasksLoaded(cached_results)).await;
-            let _ = event_tx
-                .send(AppEvent::Status("Loaded cache.".to_string()))
-                .await;
-        }
-
-        // 2. Fetch Fresh Data (Network + Local Disk)
-        // The RustyClient::get_all_tasks now handles routing!
+        // C. Fetch All Tasks
         let _ = event_tx
             .send(AppEvent::Status("Syncing...".to_string()))
             .await;
+
+        let mut cached_results = Vec::new();
+        for cal in &calendars {
+            if cal.href != LOCAL_CALENDAR_HREF
+                && let Ok(tasks) = Cache::load(&cal.href)
+            {
+                cached_results.push((cal.href.clone(), tasks));
+            }
+        }
+        if !cached_results.is_empty() {
+            let _ = event_tx.send(AppEvent::TasksLoaded(cached_results)).await;
+        }
+
         match client.get_all_tasks(&calendars).await {
             Ok(results) => {
                 let _ = event_tx.send(AppEvent::TasksLoaded(results)).await;
@@ -217,10 +247,28 @@ pub async fn run() -> Result<()> {
                         let _ = event_tx.send(AppEvent::Error(e)).await;
                     }
                 },
+                Action::IsolateCalendar(href) => match client.get_tasks(&href).await {
+                    Ok(t) => {
+                        let _ = event_tx.send(AppEvent::TasksLoaded(vec![(href, t)])).await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AppEvent::Error(e)).await;
+                    }
+                },
+
+                Action::ToggleCalendarVisibility(href) => match client.get_tasks(&href).await {
+                    Ok(t) => {
+                        let _ = event_tx.send(AppEvent::TasksLoaded(vec![(href, t)])).await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!("Fetch failed: {}", e)))
+                            .await;
+                    }
+                },
 
                 Action::CreateTask(mut new_task) => {
                     let href = new_task.calendar_href.clone();
-                    // We use the task passed in, we do NOT call Task::new here
                     match client.create_task(&mut new_task).await {
                         Ok(_) => {
                             if let Ok(t) = client.get_tasks(&href).await {
@@ -243,13 +291,7 @@ pub async fn run() -> Result<()> {
                             let _ = event_tx.send(AppEvent::Status("Saved.".to_string())).await;
                         }
                         Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error(format!(
-                                    "Sync failed (refreshing...): {}",
-                                    e
-                                )))
-                                .await;
-                            // Auto-heal: fetch latest state
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
                             if let Ok(t) = client.get_tasks(&href).await {
                                 let _ = event_tx.send(AppEvent::TasksLoaded(vec![(href, t)])).await;
                             }
@@ -259,13 +301,6 @@ pub async fn run() -> Result<()> {
 
                 Action::ToggleTask(mut task) => {
                     let href = task.calendar_href.clone();
-                    // Revert optimistic flip for API logic
-                    // (Actually the API logic I gave you uses 'toggle_task' which flips it AGAIN.
-                    // So we must pass the state BEFORE the optimistic flip).
-
-                    // Correct approach: We passed the FLIPPED task in the action.
-                    // We need to revert it to the OLD state, so the Client method can flip it back to NEW state
-                    // and respawn if needed.
                     if task.status == crate::model::TaskStatus::Completed {
                         task.status = crate::model::TaskStatus::NeedsAction;
                     } else {
@@ -280,12 +315,7 @@ pub async fn run() -> Result<()> {
                             }
                         }
                         Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error(format!(
-                                    "Toggle failed (refreshing...): {}",
-                                    e
-                                )))
-                                .await;
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
                             if let Ok(t) = client.get_tasks(&href).await {
                                 let _ = event_tx.send(AppEvent::TasksLoaded(vec![(href, t)])).await;
                             }
@@ -303,12 +333,7 @@ pub async fn run() -> Result<()> {
                         }
                         Err(e) => {
                             let href = task.calendar_href.clone();
-                            let _ = event_tx
-                                .send(AppEvent::Error(format!(
-                                    "Delete failed (refreshing...): {}",
-                                    e
-                                )))
-                                .await;
+                            let _ = event_tx.send(AppEvent::Error(e)).await;
                             if let Ok(t) = client.get_tasks(&href).await {
                                 let _ = event_tx.send(AppEvent::TasksLoaded(vec![(href, t)])).await;
                             }
@@ -320,29 +345,25 @@ pub async fn run() -> Result<()> {
                         .send(AppEvent::Status("Refreshing...".to_string()))
                         .await;
 
-                    // 1. Fetch Network Calendars
                     let mut calendars = match client.get_calendars().await {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = event_tx.send(AppEvent::Error(e)).await;
-                            vec![] // Return empty on error so we can still inject Local
+                            vec![]
                         }
                     };
 
-                    // 2. INJECT LOCAL CALENDAR
                     let local_cal = CalendarListEntry {
                         name: LOCAL_CALENDAR_NAME.to_string(),
                         href: LOCAL_CALENDAR_HREF.to_string(),
                         color: None,
                     };
                     calendars.push(local_cal);
-                    // ----------------------------------------
 
                     let _ = event_tx
                         .send(AppEvent::CalendarsLoaded(calendars.clone()))
                         .await;
 
-                    // 3. Fetch Tasks (Using the unified client)
                     match client.get_all_tasks(&calendars).await {
                         Ok(results) => {
                             let _ = event_tx.send(AppEvent::TasksLoaded(results)).await;
@@ -362,7 +383,6 @@ pub async fn run() -> Result<()> {
                         task.status = crate::model::TaskStatus::InProcess;
                     }
 
-                    // Direct update instead of using channel
                     match client.update_task(&mut task).await {
                         Ok(_) => {
                             let _ = event_tx.send(AppEvent::Status("Saved.".to_string())).await;
@@ -393,9 +413,6 @@ pub async fn run() -> Result<()> {
                     match client.move_task(&task, &new_href).await {
                         Ok(_) => {
                             let _ = event_tx.send(AppEvent::Status("Moved.".to_string())).await;
-                            // Refresh both calendars involved
-                            // (In a real implementation we might just return the two modified lists,
-                            // but fetching them ensures consistency)
                             if let Ok(t1) = client.get_tasks(&old_href).await {
                                 let _ = event_tx
                                     .send(AppEvent::TasksLoaded(vec![(old_href, t1)]))
@@ -415,7 +432,6 @@ pub async fn run() -> Result<()> {
                     }
                 }
                 Action::MigrateLocal(target_href) => {
-                    // Fetch local tasks
                     if let Ok(local_tasks) = LocalStorage::load() {
                         let _ = event_tx
                             .send(AppEvent::Status(format!(
@@ -424,13 +440,11 @@ pub async fn run() -> Result<()> {
                             )))
                             .await;
 
-                        // Use client logic
                         match client.migrate_tasks(local_tasks, &target_href).await {
                             Ok(count) => {
                                 let _ = event_tx
                                     .send(AppEvent::Status(format!("Exported {} tasks.", count)))
                                     .await;
-                                // Refresh logic: Fetch fresh states for Local (should be empty) and Target
                                 if let Ok(t1) = client.get_tasks(LOCAL_CALENDAR_HREF).await {
                                     let _ = event_tx
                                         .send(AppEvent::TasksLoaded(vec![(
@@ -472,22 +486,18 @@ pub async fn run() -> Result<()> {
 
                 AppEvent::CalendarsLoaded(cals) => {
                     app_state.calendars = cals;
-
-                    // Respect server's default first, otherwise fall back to Local
                     if let Some(def) = &default_cal
                         && let Some(found) = app_state
                             .calendars
                             .iter()
                             .find(|c| c.name == *def || c.href == *def)
-                        {
-                            app_state.active_cal_href = Some(found.href.clone());
-                        }
+                    {
+                        app_state.active_cal_href = Some(found.href.clone());
+                    }
 
-                    // If still nothing (or default was invalid), select Local
                     if app_state.active_cal_href.is_none() {
                         app_state.active_cal_href = Some(LOCAL_CALENDAR_HREF.to_string());
                     }
-
                     app_state.refresh_filtered_view();
                 }
 
@@ -497,8 +507,6 @@ pub async fn run() -> Result<()> {
                         let _ = Cache::save(&href, &tasks);
                     }
                     app_state.refresh_filtered_view();
-                    // Don't set loading=false here blindly, maybe wait for "Ready" status or check logic
-                    // But generally safe to say we have data now.
                     app_state.loading = false;
                 }
             }
@@ -526,20 +534,16 @@ pub async fn run() -> Result<()> {
                                     let mut task = Task::new(&summary, &app_state.tag_aliases);
                                     task.calendar_href = href.clone();
 
-                                    // Optimistic Update
                                     if let Some(list) = app_state.store.calendars.get_mut(&href) {
                                         list.push(task.clone());
                                     }
                                     app_state.refresh_filtered_view();
-
-                                    // Send full object
                                     let _ = action_tx.send(Action::CreateTask(task)).await;
                                 }
                                 app_state.mode = InputMode::Normal;
                                 app_state.reset_input();
                             }
                         }
-                        // ... (Esc, Char, Backspace handlers) ...
                         KeyCode::Esc => {
                             app_state.mode = InputMode::Normal;
                             app_state.reset_input();
@@ -548,7 +552,6 @@ pub async fn run() -> Result<()> {
                         KeyCode::Backspace => app_state.delete_char(),
                         _ => {}
                     },
-
                     InputMode::Editing => match key.code {
                         KeyCode::Enter => {
                             if let Some(idx) = app_state.editing_index
@@ -559,7 +562,6 @@ pub async fn run() -> Result<()> {
                                     && let Some(t) =
                                         list.iter_mut().find(|t| t.uid == view_task.uid)
                                 {
-                                    // Pass Aliases here
                                     t.apply_smart_input(
                                         &app_state.input_buffer,
                                         &app_state.tag_aliases,
@@ -584,7 +586,6 @@ pub async fn run() -> Result<()> {
                         KeyCode::Right => app_state.move_cursor_right(),
                         _ => {}
                     },
-
                     InputMode::EditingDescription => match key.code {
                         KeyCode::Enter => {
                             if let Some(idx) = app_state.editing_index
@@ -616,7 +617,6 @@ pub async fn run() -> Result<()> {
                         KeyCode::Right => app_state.move_cursor_right(),
                         _ => {}
                     },
-
                     InputMode::Searching => match key.code {
                         KeyCode::Enter | KeyCode::Esc => {
                             app_state.mode = InputMode::Normal;
@@ -643,40 +643,30 @@ pub async fn run() -> Result<()> {
                         KeyCode::Enter => {
                             if let Some(task) = app_state.get_selected_task().cloned()
                                 && let Some(idx) = app_state.move_selection_state.selected()
-                                    && let Some(target_cal) = app_state.move_targets.get(idx) {
-                                        let target_href = target_cal.href.clone();
-
-                                        // Optimistic Update
-                                        if let Some(old_list) =
-                                            app_state.store.calendars.get_mut(&task.calendar_href)
-                                        {
-                                            old_list.retain(|t| t.uid != task.uid);
-                                        }
-                                        let mut new_task_local = task.clone();
-                                        new_task_local.calendar_href = target_href.clone();
-                                        app_state
-                                            .store
-                                            .calendars
-                                            .entry(target_href.clone())
-                                            .or_default()
-                                            .push(new_task_local);
-                                        app_state.refresh_filtered_view();
-
-                                        let _ = action_tx
-                                            .send(Action::MoveTask(task, target_href))
-                                            .await;
-                                        app_state.message = format!(
-                                            "Moving '{}'...",
-                                            app_state
-                                                .get_selected_task()
-                                                .map_or("", |t| &t.summary)
-                                        );
-                                    }
+                                && let Some(target_cal) = app_state.move_targets.get(idx)
+                            {
+                                let target_href = target_cal.href.clone();
+                                if let Some(old_list) =
+                                    app_state.store.calendars.get_mut(&task.calendar_href)
+                                {
+                                    old_list.retain(|t| t.uid != task.uid);
+                                }
+                                let mut new_task_local = task.clone();
+                                new_task_local.calendar_href = target_href.clone();
+                                app_state
+                                    .store
+                                    .calendars
+                                    .entry(target_href.clone())
+                                    .or_default()
+                                    .push(new_task_local);
+                                app_state.refresh_filtered_view();
+                                let _ = action_tx.send(Action::MoveTask(task, target_href)).await;
+                                app_state.message = format!("Moving task...");
+                            }
                             app_state.mode = InputMode::Normal;
                         }
                         _ => {}
                     },
-
                     InputMode::Exporting => match key.code {
                         KeyCode::Esc => {
                             app_state.mode = InputMode::Normal;
@@ -686,14 +676,13 @@ pub async fn run() -> Result<()> {
                         KeyCode::Up | KeyCode::Char('k') => app_state.previous_export_target(),
                         KeyCode::Enter => {
                             if let Some(idx) = app_state.export_selection_state.selected()
-                                && let Some(target) = app_state.export_targets.get(idx) {
-                                    // Send Action
-                                    let _ = action_tx
-                                        .send(Action::MigrateLocal(target.href.clone()))
-                                        .await;
-                                    // Optimistic: Clear local view immediately? Maybe safer to wait for confirm.
-                                    app_state.mode = InputMode::Normal;
-                                }
+                                && let Some(target) = app_state.export_targets.get(idx)
+                            {
+                                let _ = action_tx
+                                    .send(Action::MigrateLocal(target.href.clone()))
+                                    .await;
+                                app_state.mode = InputMode::Normal;
+                            }
                         }
                         _ => {}
                     },
@@ -703,7 +692,6 @@ pub async fn run() -> Result<()> {
                             if app_state.active_focus == Focus::Main
                                 && let Some(task) = app_state.get_selected_task().cloned()
                             {
-                                // Optimistic
                                 let href = task.calendar_href.clone();
                                 if let Some(list) = app_state.store.calendars.get_mut(&href)
                                     && let Some(t) = list.iter_mut().find(|t| t.uid == task.uid)
@@ -718,12 +706,10 @@ pub async fn run() -> Result<()> {
                                 let _ = action_tx.send(Action::MarkInProcess(task)).await;
                             }
                         }
-
                         KeyCode::Char('x') => {
                             if app_state.active_focus == Focus::Main
                                 && let Some(task) = app_state.get_selected_task().cloned()
                             {
-                                // Optimistic Update
                                 let href = task.calendar_href.clone();
                                 if let Some(list) = app_state.store.calendars.get_mut(&href)
                                     && let Some(t) = list.iter_mut().find(|t| t.uid == task.uid)
@@ -735,8 +721,6 @@ pub async fn run() -> Result<()> {
                                     }
                                 }
                                 app_state.refresh_filtered_view();
-
-                                // Send Network Action
                                 let _ = action_tx.send(Action::MarkCancelled(task)).await;
                             }
                         }
@@ -744,21 +728,14 @@ pub async fn run() -> Result<()> {
                             let _ = action_tx.send(Action::Quit).await;
                             break;
                         }
-
                         KeyCode::Esc => {
                             app_state.reset_input();
-                            app_state.refresh_filtered_view(); // <--- FIXED NAME
-                            if app_state.yanked_uid.is_some() {
-                                app_state.yanked_uid = None;
-                                app_state.message = "Yank cleared.".to_string();
-                            }
+                            app_state.refresh_filtered_view();
+                            app_state.yanked_uid = None;
                         }
-
-                        // 'c' to Make Child of Yanked
                         KeyCode::Char('c') => {
                             if let Some(parent_uid) = &app_state.yanked_uid {
                                 if let Some(view_task) = app_state.get_selected_task().cloned() {
-                                    // Check self-parenting
                                     if view_task.uid == *parent_uid {
                                         app_state.message = "Cannot be child of self!".to_string();
                                     } else {
@@ -773,11 +750,8 @@ pub async fn run() -> Result<()> {
                                                 action_tx.send(Action::UpdateTask(t_clone)).await;
                                         }
                                         app_state.refresh_filtered_view();
-                                        app_state.message = "Parent set.".to_string();
                                     }
                                 }
-                            } else {
-                                app_state.message = "Nothing yanked! Press 'y' first.".to_string();
                             }
                         }
                         KeyCode::Char('/') => {
@@ -785,7 +759,6 @@ pub async fn run() -> Result<()> {
                             app_state.reset_input();
                         }
                         KeyCode::Tab => app_state.toggle_focus(),
-
                         KeyCode::Char('1') => {
                             app_state.sidebar_mode = SidebarMode::Calendars;
                             app_state.refresh_filtered_view();
@@ -803,7 +776,6 @@ pub async fn run() -> Result<()> {
                             app_state.refresh_filtered_view();
                         }
                         KeyCode::Char('M') => {
-                            // Shift + m
                             if let Some(task) = app_state.get_selected_task() {
                                 let current_href = task.calendar_href.clone();
                                 app_state.move_targets = app_state
@@ -811,15 +783,11 @@ pub async fn run() -> Result<()> {
                                     .iter()
                                     .filter(|c| {
                                         c.href != current_href
-                                            && !app_state.hidden_calendars.contains(&c.href)
+                                            && !app_state.disabled_calendars.contains(&c.href)
                                     })
                                     .cloned()
                                     .collect();
-
-                                if app_state.move_targets.is_empty() {
-                                    app_state.message =
-                                        "No other calendars to move to.".to_string();
-                                } else {
+                                if !app_state.move_targets.is_empty() {
                                     app_state.move_selection_state.select(Some(0));
                                     app_state.mode = InputMode::Moving;
                                     app_state.message =
@@ -827,31 +795,70 @@ pub async fn run() -> Result<()> {
                                 }
                             }
                         }
-
                         KeyCode::Down | KeyCode::Char('j') => app_state.next(),
                         KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
                         KeyCode::PageDown => app_state.jump_forward(10),
                         KeyCode::PageUp => app_state.jump_backward(10),
+
+                        KeyCode::Char(' ') => {
+                            if app_state.active_focus == Focus::Sidebar {
+                                if app_state.sidebar_mode == SidebarMode::Calendars {
+                                    if let Some(idx) = app_state.cal_state.selected() {
+                                        // CHANGED: Use get_filtered_calendars()
+                                        let filtered = app_state.get_filtered_calendars();
+                                        if let Some(cal) = filtered.get(idx) {
+                                            let href = cal.href.clone();
+                                            // Prevent hiding the active target
+                                            if app_state.active_cal_href.as_ref() != Some(&href) {
+                                                if app_state.hidden_calendars.contains(&href) {
+                                                    app_state.hidden_calendars.remove(&href);
+                                                    let _ = action_tx
+                                                        .send(Action::ToggleCalendarVisibility(
+                                                            href,
+                                                        ))
+                                                        .await;
+                                                } else {
+                                                    app_state.hidden_calendars.insert(href);
+                                                }
+                                                app_state.refresh_filtered_view();
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if app_state.active_focus == Focus::Main
+                                && let Some(task) = app_state.get_selected_task().cloned()
+                            {
+                                let cal_href = task.calendar_href.clone();
+                                if let Some(list) = app_state.store.calendars.get_mut(&cal_href)
+                                    && let Some(t) = list.iter_mut().find(|t| t.uid == task.uid)
+                                {
+                                    t.status = if t.status == crate::model::TaskStatus::Completed {
+                                        crate::model::TaskStatus::NeedsAction
+                                    } else {
+                                        crate::model::TaskStatus::Completed
+                                    };
+                                    let t_flipped = t.clone();
+                                    let _ = action_tx.send(Action::ToggleTask(t_flipped)).await;
+                                }
+                                app_state.refresh_filtered_view();
+                            }
+                        }
 
                         KeyCode::Enter => {
                             if app_state.active_focus == Focus::Sidebar {
                                 match app_state.sidebar_mode {
                                     SidebarMode::Calendars => {
                                         if let Some(idx) = app_state.cal_state.selected() {
-                                            let visible_cals: Vec<&CalendarListEntry> = app_state
-                                                .calendars
-                                                .iter()
-                                                .filter(|c| {
-                                                    !app_state.hidden_calendars.contains(&c.href)
-                                                })
-                                                .collect();
-
-                                            if let Some(cal) = visible_cals.get(idx) {
+                                            let filtered = app_state.get_filtered_calendars();
+                                            if let Some(cal) = filtered.get(idx) {
                                                 let href = cal.href.clone();
                                                 app_state.active_cal_href = Some(href.clone());
-                                                app_state.refresh_filtered_view(); // Updates view from Store immediately
 
-                                                // ONLY send network request if NOT local
+                                                if app_state.hidden_calendars.contains(&href) {
+                                                    app_state.hidden_calendars.remove(&href);
+                                                }
+                                                app_state.refresh_filtered_view();
+
                                                 if href != LOCAL_CALENDAR_HREF {
                                                     let _ = action_tx
                                                         .send(Action::SwitchCalendar(href))
@@ -867,7 +874,6 @@ pub async fn run() -> Result<()> {
                                             &app_state.selected_categories,
                                             &app_state.hidden_calendars,
                                         );
-
                                         if let Some(idx) = app_state.cal_state.selected()
                                             && let Some(c) = cats.get(idx)
                                         {
@@ -890,11 +896,11 @@ pub async fn run() -> Result<()> {
                         }
                         KeyCode::Char('e') => {
                             if app_state.active_focus == Focus::Main {
-                                let smart_str =
-                                    app_state.get_selected_task().map(|t| t.to_smart_string());
-                                if let Some(s) = smart_str {
+                                if let Some(smart_str) =
+                                    app_state.get_selected_task().map(|t| t.to_smart_string())
+                                {
                                     app_state.editing_index = app_state.list_state.selected();
-                                    app_state.input_buffer = s;
+                                    app_state.input_buffer = smart_str;
                                     app_state.cursor_position =
                                         app_state.input_buffer.chars().count();
                                     app_state.mode = InputMode::Editing;
@@ -903,9 +909,9 @@ pub async fn run() -> Result<()> {
                         }
                         KeyCode::Char('E') => {
                             if app_state.active_focus == Focus::Main {
-                                let desc =
-                                    app_state.get_selected_task().map(|t| t.description.clone());
-                                if let Some(d) = desc {
+                                if let Some(d) =
+                                    app_state.get_selected_task().map(|t| t.description.clone())
+                                {
                                     app_state.editing_index = app_state.list_state.selected();
                                     app_state.input_buffer = d;
                                     app_state.cursor_position =
@@ -914,45 +920,24 @@ pub async fn run() -> Result<()> {
                                 }
                             }
                         }
-                        KeyCode::Char(' ') => {
-                            if app_state.active_focus == Focus::Main
-                                && let Some(task) = app_state.get_selected_task().cloned()
-                            {
-                                let cal_href = task.calendar_href.clone();
-                                if let Some(list) = app_state.store.calendars.get_mut(&cal_href)
-                                    && let Some(t) = list.iter_mut().find(|t| t.uid == task.uid)
-                                {
-                                    // Optimistic Toggle
-                                    t.status = if t.status == crate::model::TaskStatus::Completed {
-                                        crate::model::TaskStatus::NeedsAction
-                                    } else {
-                                        crate::model::TaskStatus::Completed
-                                    };
-                                    let t_flipped = t.clone();
-                                    let _ = action_tx.send(Action::ToggleTask(t_flipped)).await;
-                                }
-                                app_state.refresh_filtered_view();
-                            }
-                        }
                         KeyCode::Char('d') => {
                             if app_state.active_focus == Focus::Main
                                 && let Some(task) = app_state.get_selected_task().cloned()
                             {
-                                let cal_href = task.calendar_href.clone();
-                                if let Some(list) = app_state.store.calendars.get_mut(&cal_href) {
+                                let href = task.calendar_href.clone();
+                                if let Some(list) = app_state.store.calendars.get_mut(&href) {
                                     list.retain(|t| t.uid != task.uid);
                                 }
                                 app_state.refresh_filtered_view();
                                 let _ = action_tx.send(Action::DeleteTask(task)).await;
                             }
                         }
-
                         KeyCode::Char('+') => {
                             if app_state.active_focus == Focus::Main
                                 && let Some(view_task) = app_state.get_selected_task().cloned()
                             {
-                                let cal_href = view_task.calendar_href.clone();
-                                if let Some(list) = app_state.store.calendars.get_mut(&cal_href)
+                                let href = view_task.calendar_href.clone();
+                                if let Some(list) = app_state.store.calendars.get_mut(&href)
                                     && let Some(t) =
                                         list.iter_mut().find(|t| t.uid == view_task.uid)
                                 {
@@ -963,11 +948,9 @@ pub async fn run() -> Result<()> {
                                         1 => 1,
                                         _ => 5,
                                     };
-                                    if new_prio != t.priority {
-                                        t.priority = new_prio;
-                                        let t_clone = t.clone();
-                                        let _ = action_tx.send(Action::UpdateTask(t_clone)).await;
-                                    }
+                                    t.priority = new_prio;
+                                    let t_clone = t.clone();
+                                    let _ = action_tx.send(Action::UpdateTask(t_clone)).await;
                                 }
                                 app_state.refresh_filtered_view();
                             }
@@ -976,8 +959,8 @@ pub async fn run() -> Result<()> {
                             if app_state.active_focus == Focus::Main
                                 && let Some(view_task) = app_state.get_selected_task().cloned()
                             {
-                                let cal_href = view_task.calendar_href.clone();
-                                if let Some(list) = app_state.store.calendars.get_mut(&cal_href)
+                                let href = view_task.calendar_href.clone();
+                                if let Some(list) = app_state.store.calendars.get_mut(&href)
                                     && let Some(t) =
                                         list.iter_mut().find(|t| t.uid == view_task.uid)
                                 {
@@ -988,11 +971,9 @@ pub async fn run() -> Result<()> {
                                         0 => 0,
                                         _ => 0,
                                     };
-                                    if new_prio != t.priority {
-                                        t.priority = new_prio;
-                                        let t_clone = t.clone();
-                                        let _ = action_tx.send(Action::UpdateTask(t_clone)).await;
-                                    }
+                                    t.priority = new_prio;
+                                    let t_clone = t.clone();
+                                    let _ = action_tx.send(Action::UpdateTask(t_clone)).await;
                                 }
                                 app_state.refresh_filtered_view();
                             }
@@ -1035,32 +1016,26 @@ pub async fn run() -> Result<()> {
                             }
                         }
                         KeyCode::Char('y') => {
-                            let selection = app_state
+                            if let Some(t_data) = app_state
                                 .get_selected_task()
-                                .map(|t| (t.uid.clone(), t.summary.clone()));
-
-                            if let Some((uid, summary)) = selection {
-                                app_state.yanked_uid = Some(uid);
-                                app_state.message = format!("Yanked: {}", summary);
+                                .map(|t| (t.uid.clone(), t.summary.clone()))
+                            {
+                                app_state.yanked_uid = Some(t_data.0);
+                                app_state.message = format!("Yanked: {}", t_data.1);
                             }
                         }
                         KeyCode::Char('r') => {
                             let _ = action_tx.send(Action::Refresh).await;
                         }
                         KeyCode::Char('b') => {
-                            // "Block this task with the yanked one"
                             if let Some(yanked) = &app_state.yanked_uid {
                                 if let Some(current) = app_state.get_selected_task() {
                                     if current.uid == *yanked {
                                         app_state.message = "Cannot depend on self!".to_string();
                                     } else {
-                                        // Clone to modify
                                         let mut t_clone = current.clone();
-                                        // Add dependency if not exists
                                         if !t_clone.dependencies.contains(yanked) {
                                             t_clone.dependencies.push(yanked.clone());
-
-                                            // Optimistic update
                                             let href = t_clone.calendar_href.clone();
                                             if let Some(list) =
                                                 app_state.store.calendars.get_mut(&href)
@@ -1069,48 +1044,100 @@ pub async fn run() -> Result<()> {
                                             {
                                                 t.dependencies.push(yanked.clone());
                                             }
-
                                             let _ =
                                                 action_tx.send(Action::UpdateTask(t_clone)).await;
                                             app_state.refresh_filtered_view();
-                                            app_state.message = "Dependency added.".to_string();
                                         }
                                     }
                                 }
-                            } else {
-                                app_state.message =
-                                    "Nothing yanked! Press 'y' on a task first.".to_string();
                             }
                         }
                         KeyCode::Char('X') => {
-                            // Shift + x
-                            // Only allow if active calendar is Local
                             if app_state.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
-                                // Filter targets (All remote cals)
                                 app_state.export_targets = app_state
                                     .calendars
                                     .iter()
                                     .filter(|c| {
                                         c.href != LOCAL_CALENDAR_HREF
-                                            && !app_state.hidden_calendars.contains(&c.href)
+                                            && !app_state.disabled_calendars.contains(&c.href)
                                     })
                                     .cloned()
                                     .collect();
-
-                                if app_state.export_targets.is_empty() {
-                                    app_state.message =
-                                        "No remote calendars to export to.".to_string();
-                                } else {
+                                if !app_state.export_targets.is_empty() {
                                     app_state.export_selection_state.select(Some(0));
                                     app_state.mode = InputMode::Exporting;
-                                    app_state.message = "Select export target...".to_string();
                                 }
-                            } else {
-                                app_state.message =
-                                    "Export only available from Local calendar.".to_string();
                             }
                         }
+                        KeyCode::Char('*') => {
+                            if app_state.active_focus == Focus::Sidebar
+                                && app_state.sidebar_mode == SidebarMode::Calendars
+                            {
+                                // Check current state
+                                let enabled_count = app_state
+                                    .calendars
+                                    .iter()
+                                    .filter(|c| !app_state.disabled_calendars.contains(&c.href))
+                                    .count();
 
+                                let visible_count = app_state
+                                    .calendars
+                                    .iter()
+                                    .filter(|c| {
+                                        !app_state.disabled_calendars.contains(&c.href)
+                                            && !app_state.hidden_calendars.contains(&c.href)
+                                    })
+                                    .count();
+
+                                if visible_count == enabled_count {
+                                    // Hide All (except active)
+                                    for cal in &app_state.calendars {
+                                        if app_state.active_cal_href.as_ref() != Some(&cal.href) {
+                                            app_state.hidden_calendars.insert(cal.href.clone());
+                                        }
+                                    }
+                                } else {
+                                    // Show All
+                                    app_state.hidden_calendars.clear();
+                                    // Trigger a refresh to ensure we have data for the newly shown calendars
+                                    let _ = action_tx.send(Action::Refresh).await;
+                                }
+                                app_state.refresh_filtered_view();
+                            }
+                        }
+                        KeyCode::Right => {
+                            if app_state.active_focus == Focus::Sidebar
+                                && app_state.sidebar_mode == SidebarMode::Calendars
+                            {
+                                if let Some(idx) = app_state.cal_state.selected() {
+                                    // CHANGED: Use get_filtered_calendars()
+                                    let filtered = app_state.get_filtered_calendars();
+                                    if let Some(cal) = filtered.get(idx) {
+                                        let href = cal.href.clone();
+                                        app_state.active_cal_href = Some(href.clone());
+
+                                        // Isolate Logic
+                                        app_state.hidden_calendars.clear();
+                                        for c in &app_state.calendars {
+                                            if c.href != href {
+                                                app_state.hidden_calendars.insert(c.href.clone());
+                                            }
+                                        }
+
+                                        app_state.refresh_filtered_view();
+                                        if href != LOCAL_CALENDAR_HREF {
+                                            let _ =
+                                                action_tx.send(Action::IsolateCalendar(href)).await;
+                                        }
+                                    }
+                                }
+                            } else if app_state.mode == InputMode::Editing {
+                                // Allow right arrow navigation in edit mode
+                                app_state.move_cursor_right();
+                            }
+                            // Note: Main view might use Right for something else?
+                            // Currently it's mapped to nothing in Normal/Main, so this is safe.
+                        }
                         _ => {}
                     },
                 },
