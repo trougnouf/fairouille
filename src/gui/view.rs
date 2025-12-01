@@ -1,3 +1,4 @@
+// File: ./src/gui/view.rs
 use crate::gui::icon;
 use crate::gui::message::Message;
 use crate::gui::state::{AppState, GuiApp, SidebarMode};
@@ -6,8 +7,8 @@ use crate::storage::LOCAL_CALENDAR_HREF;
 use crate::store::UNCATEGORIZED_ID;
 
 use iced::widget::{
-    Rule, button, checkbox, column, container, horizontal_space, row, scrollable, text, text_input,
-    toggler,
+    Rule, button, checkbox, column, container, horizontal_space, row, scrollable, text,
+    text_editor, text_input, toggler,
 };
 use iced::{Background, Color, Element, Length, Theme};
 
@@ -475,7 +476,7 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
             .unwrap_or("Default");
 
         format!(
-            "Add task to {} (e.g. Buy cat food !1 @weekly #groceries ~30m)",
+            "Add task to {} (e.g. Buy cat food !1 @weekly #groceries ~30m)", // TODO generate something fun and random here
             target_name
         )
     };
@@ -489,11 +490,11 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
 
     // 3. Layout Construction
     if app.editing_uid.is_some() {
-        let input_desc = text_input("Notes...", &app.description_value)
-            .on_input(Message::DescriptionChanged)
-            .on_submit(Message::SubmitTask)
+        let input_desc = text_editor(&app.description_value)
+            .placeholder("Notes...") // TODO generate something fun and random here
+            .on_action(Message::DescriptionChanged)
             .padding(10)
-            .size(16);
+            .height(Length::Fixed(100.0)); // Give it some height
 
         let cancel_btn = button(text("Cancel").size(16))
             .style(button::secondary)
@@ -556,14 +557,9 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
         }
 
         // 3. Assemble Layout
-        column![
-            top_bar,
-            input_title,
-            input_desc,
-            move_element // Placed at bottom of edit area, or swap with input_desc if preferred
-        ]
-        .spacing(10)
-        .into()
+        column![top_bar, input_title, input_desc, move_element]
+            .spacing(10)
+            .into()
     } else {
         column![input_title,].spacing(5).into()
     }

@@ -1,6 +1,8 @@
+// File: ./src/gui/state.rs
 use crate::client::RustyClient;
 use crate::model::{CalendarListEntry, Task as TodoTask};
 use crate::store::TaskStore;
+use iced::widget::text_editor; // Import text_editor
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default, PartialEq, Clone, Copy, Debug)]
@@ -50,7 +52,7 @@ pub struct GuiApp {
 
     // Inputs - Main
     pub input_value: String,
-    pub description_value: String,
+    pub description_value: text_editor::Content,
     pub search_value: String,
     pub editing_uid: Option<String>,
     pub expanded_tasks: HashSet<String>,
@@ -101,7 +103,7 @@ impl Default for GuiApp {
             filter_include_unset_duration: true,
 
             input_value: String::new(),
-            description_value: String::new(),
+            description_value: text_editor::Content::new(), // Initialized empty
             search_value: String::new(),
             editing_uid: None,
             expanded_tasks: HashSet::new(),

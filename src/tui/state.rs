@@ -157,7 +157,7 @@ impl AppState {
         } else {
             let current = self.list_state.selected().unwrap_or(0);
             if current >= len {
-                self.list_state.select(Some(len - 1));
+                self.list_state.select(Some(len - 1)); // Clamp
             } else {
                 self.list_state.select(Some(current));
             }

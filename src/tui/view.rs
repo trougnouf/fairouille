@@ -13,8 +13,11 @@ use ratatui::{
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
-        // REMOVED .as_ref() below
-        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .constraints(if state.mode == InputMode::EditingDescription {
+            [Constraint::Min(0), Constraint::Length(10)]
+        } else {
+            [Constraint::Min(0), Constraint::Length(3)]
+        })
         .split(f.area());
 
     let h_chunks = Layout::default()
@@ -261,6 +264,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     // --- Footer ---
     let footer_area = v_chunks[1];
+    // ALWAYS CLEAR FOOTER AREA before rendering input/help
+    f.render_widget(Clear, footer_area);
     match state.mode {
         InputMode::Creating
         | InputMode::Editing
@@ -272,14 +277,74 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 InputMode::EditingDescription => (" Edit Description ", "📝 ", Color::Blue),
                 _ => (" Create Task ", "> ", Color::Yellow),
             };
-            let input = Paragraph::new(format!("{}{}", prefix, state.input_buffer))
+
+            let input_text = format!("{}{}", prefix, state.input_buffer);
+            let input = Paragraph::new(input_text.clone())
                 .style(Style::default().fg(color))
-                .block(Block::default().borders(Borders::ALL).title(title));
+                .block(Block::default().borders(Borders::ALL).title(title))
+                // IMPORTANT: Disable wrapping for input to match our linear cursor logic
+                // OR implement complex 2D cursor logic.
+                // Disabling wrap is safer for now to prevent corruption.
+                .wrap(Wrap { trim: false });
+
             f.render_widget(input, footer_area);
-            let cursor_x =
-                footer_area.x + 1 + prefix.chars().count() as u16 + state.cursor_position as u16;
-            let cursor_y = footer_area.y + 1;
-            f.set_cursor_position((cursor_x, cursor_y));
+
+            // Simple cursor logic for single-line (Creating/Searching/Editing Title)
+            // For Description (Multiline), we need to calculate X/Y
+            if state.mode == InputMode::EditingDescription {
+                let inner_width = (footer_area.width.saturating_sub(2)) as usize;
+
+                // Calculate cursor position considering newlines
+                // We must emulate how Paragraph renders it.
+                // Since we disabled wrapping above (to be safe), lines only break on \n
+
+                let combined = format!("{}{}", prefix, state.input_buffer);
+                let chars: Vec<char> = combined.chars().collect();
+
+                // Position of cursor in the combined string
+                let target_idx = prefix.chars().count() + state.cursor_position;
+
+                let mut x = 0;
+                let mut y = 0;
+
+                for (i, ch) in chars.iter().enumerate() {
+                    if i == target_idx {
+                        break;
+                    }
+                    if *ch == '\n' {
+                        y += 1;
+                        x = 0;
+                    } else {
+                        x += 1;
+                        // Handle rudimentary wrapping if text exceeds width
+                        // (Though we disabled wrapping in widget, long lines might clip)
+                        if x >= inner_width {
+                            y += 1;
+                            x = 0;
+                        }
+                    }
+                }
+
+                let screen_x = footer_area.x + 1 + x as u16;
+                let screen_y = footer_area.y + 1 + y as u16;
+
+                // Only set cursor if within bounds
+                if screen_y < footer_area.y + footer_area.height - 1 {
+                    f.set_cursor_position((screen_x, screen_y));
+                }
+            } else {
+                // Standard Single Line Logic
+                let cursor_x = footer_area.x
+                    + 1
+                    + prefix.chars().count() as u16
+                    + state.cursor_position as u16;
+                // Clamp visual cursor to input box width to prevent drawing over border
+                let max_x = footer_area.x + footer_area.width - 2;
+                if cursor_x <= max_x {
+                    let cursor_y = footer_area.y + 1;
+                    f.set_cursor_position((cursor_x, cursor_y));
+                }
+            }
         }
 
         InputMode::Normal | InputMode::Moving | InputMode::Exporting => {

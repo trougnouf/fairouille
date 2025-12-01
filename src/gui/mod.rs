@@ -570,8 +570,9 @@ impl GuiApp {
                 self.input_value = value;
                 Task::none()
             }
-            Message::DescriptionChanged(value) => {
-                self.description_value = value;
+
+            Message::DescriptionChanged(action) => {
+                self.description_value.perform(action);
                 Task::none()
             }
 
@@ -595,11 +596,16 @@ impl GuiApp {
                         {
                             let task = &mut tasks[target_idx];
                             task.apply_smart_input(&self.input_value, &self.tag_aliases);
-                            task.description = self.description_value.clone();
+
+                            // extract text from Content
+                            task.description = self.description_value.text();
 
                             let task_copy = task.clone();
                             self.input_value.clear();
-                            self.description_value.clear();
+
+                            // Reset Content
+                            self.description_value = iced::widget::text_editor::Content::new();
+
                             self.editing_uid = None;
                             self.refresh_filtered_tasks();
 
@@ -772,14 +778,18 @@ impl GuiApp {
             Message::EditTaskStart(index) => {
                 if let Some(task) = self.tasks.get(index) {
                     self.input_value = task.to_smart_string();
-                    self.description_value = task.description.clone();
+
+                    // Load existing description into Content
+                    self.description_value =
+                        iced::widget::text_editor::Content::with_text(&task.description);
+
                     self.editing_uid = Some(task.uid.clone());
                 }
                 Task::none()
             }
             Message::CancelEdit => {
                 self.input_value.clear();
-                self.description_value.clear();
+                self.description_value = iced::widget::text_editor::Content::new();
                 self.editing_uid = None;
                 Task::none()
             }
@@ -1216,52 +1226,32 @@ async fn async_fetch_all_wrapper(
         .map_err(|e| e.to_string())?
 }
 
-async fn async_create_wrapper(client: RustyClient, task: TodoTask) -> Result<TodoTask, String> {
-    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
-    rt.spawn(async move { async_create(client, task).await })
-        .await
-        .map_err(|e| e.to_string())?
+async fn async_create_wrapper(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
+    let _ = client.create_task(&mut task).await?; // Discard logs for now in GUI
+    Ok(task)
 }
-async fn async_update_wrapper(client: RustyClient, task: TodoTask) -> Result<TodoTask, String> {
-    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
-    rt.spawn(async move { async_update(client, task).await })
-        .await
-        .map_err(|e| e.to_string())?
+async fn async_update_wrapper(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
+    let _ = client.update_task(&mut task).await?;
+    Ok(task)
 }
 async fn async_delete_wrapper(client: RustyClient, task: TodoTask) -> Result<(), String> {
-    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
-    rt.spawn(async move { client.delete_task(&task).await })
-        .await
-        .map_err(|e| e.to_string())?
+    let _ = client.delete_task(&task).await?;
+    Ok(())
 }
 async fn async_toggle_wrapper(
     client: RustyClient,
     mut task: TodoTask,
 ) -> Result<(TodoTask, Option<TodoTask>), String> {
-    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
-    rt.spawn(async move { client.toggle_task(&mut task).await })
-        .await
-        .map_err(|e| e.to_string())?
+    let (_, next, _) = client.toggle_task(&mut task).await?;
+    Ok((task, next))
 }
-
-async fn async_create(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
-    client.create_task(&mut task).await?;
-    Ok(task)
-}
-async fn async_update(client: RustyClient, mut task: TodoTask) -> Result<TodoTask, String> {
-    client.update_task(&mut task).await?;
-    Ok(task)
-}
-
 async fn async_move_wrapper(
     client: RustyClient,
     task: TodoTask,
     new_href: String,
 ) -> Result<TodoTask, String> {
-    let rt = TOKIO_RUNTIME.get().expect("Runtime not initialized");
-    rt.spawn(async move { client.move_task(&task, &new_href).await })
-        .await
-        .map_err(|e| e.to_string())?
+    let (t, _) = client.move_task(&task, &new_href).await?;
+    Ok(t)
 }
 
 async fn async_migrate_wrapper(

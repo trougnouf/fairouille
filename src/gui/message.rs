@@ -1,7 +1,9 @@
+// File: ./src/gui/message.rs
 use crate::client::RustyClient;
 use crate::config::Config;
 use crate::gui::state::SidebarMode;
 use crate::model::{CalendarListEntry, Task as TodoTask};
+use iced::widget::text_editor;
 
 pub type LoadedResult = Result<
     (
@@ -27,7 +29,10 @@ pub enum Message {
     OpenSettings,
     CancelSettings,
     InputChanged(String),
-    DescriptionChanged(String),
+
+    // CHANGED: Accepts text_editor::Action instead of String
+    DescriptionChanged(text_editor::Action),
+
     SearchChanged(String),
     SubmitTask,
     ToggleTask(usize, bool),

@@ -50,9 +50,6 @@ pub struct RustyClient {
 }
 
 impl RustyClient {
-    // ... [Previous methods: new, discover_calendar, connect_with_fallback, get_calendars, get_tasks] ...
-    // COPY THESE FROM YOUR EXISTING CODE, they are unchanged.
-
     pub fn new(url: &str, user: &str, pass: &str, insecure: bool) -> Result<Self, String> {
         if url.is_empty() {
             return Ok(Self { client: None });
@@ -326,12 +323,13 @@ impl RustyClient {
         Ok(final_results)
     }
 
-    pub async fn create_task(&self, task: &mut Task) -> Result<(), String> {
+    // Returns Result<Vec<String>, String>
+    pub async fn create_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
             let mut all = LocalStorage::load().unwrap_or_default();
             all.push(task.clone());
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
-            return Ok(());
+            return Ok(vec![]);
         }
         let cal_path = task.calendar_href.clone();
         let filename = format!("{}.ics", task.uid);
@@ -345,31 +343,37 @@ impl RustyClient {
         self.sync_journal().await
     }
 
-    pub async fn update_task(&self, task: &mut Task) -> Result<(), String> {
+    // Returns Result<Vec<String>, String>
+    pub async fn update_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
             let mut all = LocalStorage::load().unwrap_or_default();
             if let Some(idx) = all.iter().position(|t| t.uid == task.uid) {
                 all[idx] = task.clone();
                 LocalStorage::save(&all).map_err(|e| e.to_string())?;
             }
-            return Ok(());
+            return Ok(vec![]);
         }
         Journal::push(Action::Update(task.clone())).map_err(|e| e.to_string())?;
         self.sync_journal().await
     }
 
-    pub async fn delete_task(&self, task: &Task) -> Result<(), String> {
+    // Returns Result<Vec<String>, String>
+    pub async fn delete_task(&self, task: &Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
             let mut all = LocalStorage::load().unwrap_or_default();
             all.retain(|t| t.uid != task.uid);
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
-            return Ok(());
+            return Ok(vec![]);
         }
         Journal::push(Action::Delete(task.clone())).map_err(|e| e.to_string())?;
         self.sync_journal().await
     }
 
-    pub async fn toggle_task(&self, task: &mut Task) -> Result<(Task, Option<Task>), String> {
+    // Returns Result<(Task, Option<Task>, Vec<String>), String>
+    pub async fn toggle_task(
+        &self,
+        task: &mut Task,
+    ) -> Result<(Task, Option<Task>, Vec<String>), String> {
         if task.status == TaskStatus::Completed {
             task.status = TaskStatus::NeedsAction;
         } else {
@@ -389,16 +393,25 @@ impl RustyClient {
                 all.push(new_t.clone());
             }
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
-            return Ok((task.clone(), next_task));
+            return Ok((task.clone(), next_task, vec![]));
         }
+
+        let mut logs = Vec::new();
         if let Some(mut next) = next_task.clone() {
-            self.create_task(&mut next).await?;
+            let l = self.create_task(&mut next).await?;
+            logs.extend(l);
         }
-        self.update_task(task).await?;
-        Ok((task.clone(), next_task))
+        let l = self.update_task(task).await?;
+        logs.extend(l);
+        Ok((task.clone(), next_task, logs))
     }
 
-    pub async fn move_task(&self, task: &Task, new_calendar_href: &str) -> Result<Task, String> {
+    // CHANGED: Returns Result<(Task, Vec<String>), String>
+    pub async fn move_task(
+        &self,
+        task: &Task,
+        new_calendar_href: &str,
+    ) -> Result<(Task, Vec<String>), String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
             let mut new_task = task.clone();
             new_task.calendar_href = new_calendar_href.to_string();
@@ -406,14 +419,14 @@ impl RustyClient {
             new_task.etag = String::new();
             self.create_task(&mut new_task).await?;
             self.delete_task(task).await?;
-            return Ok(new_task);
+            return Ok((new_task, vec![]));
         }
         Journal::push(Action::Move(task.clone(), new_calendar_href.to_string()))
             .map_err(|e| e.to_string())?;
         let mut t = task.clone();
         t.calendar_href = new_calendar_href.to_string();
-        self.sync_journal().await?;
-        Ok(t)
+        let logs = self.sync_journal().await?;
+        Ok((t, logs))
     }
 
     pub async fn migrate_tasks(
@@ -436,15 +449,17 @@ impl RustyClient {
         Ok(count)
     }
 
-    pub async fn sync_journal(&self) -> Result<(), String> {
+    // Returns Result<Vec<String>, String> to report warnings
+    pub async fn sync_journal(&self) -> Result<Vec<String>, String> {
         let client = self.client.as_ref().ok_or("Offline")?;
+        let mut warnings = Vec::new();
 
         loop {
             // 1. PEEK: Check head of journal without removing it yet
             let next_action = {
                 let j = Journal::load();
                 if j.queue.is_empty() {
-                    return Ok(());
+                    return Ok(warnings);
                 }
                 j.queue[0].clone()
             };
@@ -494,9 +509,15 @@ impl RustyClient {
                             }
                             Ok(())
                         }
+                        // Handle 412: Stale ETag
                         Err(WebDavError::BadStatusCode(StatusCode::PRECONDITION_FAILED))
                         | Err(WebDavError::PreconditionFailed(_)) => {
-                            println!("Conflict (412) on task {}. Creating copy.", task.uid);
+                            let msg = format!(
+                                "Conflict (412) on task '{}'. Creating conflict copy.",
+                                task.summary
+                            );
+                            warnings.push(msg); // Add to warnings
+
                             let mut conflict_copy = task.clone();
                             conflict_copy.uid = Uuid::new_v4().to_string();
                             conflict_copy.summary = format!("{} (Conflict Copy)", task.summary);
@@ -512,10 +533,12 @@ impl RustyClient {
                         Err(e) => {
                             let msg = format!("{:?}", e);
                             if msg.contains("412") || msg.contains("PreconditionFailed") {
-                                println!(
-                                    "Conflict (412-Fallback) on task {}. Creating copy.",
-                                    task.uid
+                                let w = format!(
+                                    "Conflict (412-Fallback) on task '{}'. Creating conflict copy.",
+                                    task.summary
                                 );
+                                warnings.push(w);
+
                                 let mut conflict_copy = task.clone();
                                 conflict_copy.uid = Uuid::new_v4().to_string();
                                 conflict_copy.summary = format!("{} (Conflict Copy)", task.summary);
@@ -538,7 +561,10 @@ impl RustyClient {
                         Ok(_) => Ok(()),
                         Err(WebDavError::BadStatusCode(StatusCode::NOT_FOUND)) => Ok(()),
                         Err(WebDavError::BadStatusCode(StatusCode::PRECONDITION_FAILED)) => {
-                            println!("Conflict on delete task {}. Ignoring.", task.uid);
+                            warnings.push(format!(
+                                "Conflict on delete task '{}'. Ignoring.",
+                                task.summary
+                            ));
                             Ok(())
                         }
                         Err(e) => Err(format!("{:?}", e)),
@@ -632,8 +658,6 @@ impl RustyClient {
                 }
                 Err(e) => {
                     // FAILURE:
-                    // The action is still on disk at head. We do nothing.
-                    // We simply return error so the UI knows we stopped.
                     return Err(e);
                 }
             }
