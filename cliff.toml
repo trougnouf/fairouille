@@ -4,6 +4,7 @@
 # New release instructions:
 # check `cargo clippy --all-features` and `cargo test`
 # example for TAG=0.2.0
+# cargo about generate about.hbs > LICENSES/RUST_DEPENDENCIES.html
 # git-cliff -t ${TAG} -o CHANGELOG.md && git add . && git commit -m 'chore(release): Update changelog for v"${TAG}"' && git push
 # patch release:
 # cargo release patch --dry-run

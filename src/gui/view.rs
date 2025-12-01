@@ -474,7 +474,10 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
             .map(|c| c.name.as_str())
             .unwrap_or("Default");
 
-        format!("Add task to '{}' (!1 @tomorrow #tag)...", target_name)
+        format!(
+            "Add task to {} (e.g. Buy cat food !1 @weekly #groceries ~30m)",
+            target_name
+        )
     };
 
     // 1. Main Text Input
