@@ -6,56 +6,37 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# Global build optimizations to save RAM
-env:
-  # Use lld linker and reduce debug info to the absolute minimum
-  RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C debuginfo=0"
-  # Tell cargo to use less concurrency to save RAM
-  CARGO_BUILD_JOBS: 2
-
 jobs:
   build-and-release:
-    runs-on: codeberg-medium
+    runs-on: self-hosted-rust
+    container:
+      image: ghcr.io/catthehacker/ubuntu:rust-latest
+      volumes:
+        - cargo-registry:/usr/local/cargo/registry
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Rust Toolchain
-        uses: https://codeberg.org/wackbyte/rust-toolchain@trunk
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-gnu
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      # We still need to add the cross-compile target
+      - name: Add Windows target
+        run: rustup target add x86_64-pc-windows-gnu
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev mingw-w64 lld
+          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev mingw-w64
 
-      - name: Install cargo-deb (from .deb)
-        run: |
-          wget https://github.com/kornelski/cargo-deb/releases/download/v3.6.2/cargo-deb_3.6.2-1_amd64.deb
-          sudo dpkg -i cargo-deb_3.6.2-1_amd64.deb
+      - name: Install Packaging Tools
+        run: cargo install cargo-deb
 
-      # --- BUILD LINUX ---
       - name: Build Linux (Release)
         run: cargo build --release --features gui
-
+      
+      # (All other steps remain the same)
       - name: Create Linux Packages
         run: |
-          # The command remains the same as dpkg puts it in the PATH
           cargo deb --no-build --features gui 
           
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
@@ -77,17 +58,11 @@ jobs:
             SOURCE_URL="${{ github.server_url }}/${{ github.repository }}/archive/${{ github.ref_name }}.tar.gz"
             curl -L -O "$SOURCE_URL"
             HASH=$(sha256sum "${{ github.ref_name }}.tar.gz" | awk '{print $1}')
-            sed -i "s/'SKIP'/'$HASH'/" packaging/arch/PKGBUILD
-            cp packaging/arch/PKGBUILD PKGBUILD-release
+            sed -i "s/'SKIP'/'$HASH'/" packaging/arch/PKGBuild
+            cp packaging/arch/PKGBuild PKGBuild-release
           fi
-
-      # --- BUILD WINDOWS (CROSS) ---
       - name: Build Windows (Cross-compile)
-        env:
-          RUSTFLAGS: "" # Reset flags for Windows build
-        run: |
-          cargo build --release --target x86_64-pc-windows-gnu --features gui
-
+        run: cargo build --release --target x86_64-pc-windows-gnu --features gui
       - name: Package Windows
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
@@ -104,15 +79,12 @@ jobs:
           cd windows-staging
           zip -r "../cfait-windows-$VERSION.zip" .
           cd ..
-
-      # --- UPLOAD SECTION ---
       - name: Install Tea (Gitea CLI)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          wget -O tea https://dl.gitea.io/tea/0.9.2/tea-0.9.2-linux-amd64
+          wget -O tea https://dl.gitea.io/tea/1.25.2/tea-1.25.2-linux-amd64
           chmod +x tea
           sudo mv tea /usr/local/bin/
-
       - name: Generate Changelog
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -120,7 +92,6 @@ jobs:
           tar -xzf git-cliff.tar.gz
           sudo mv git-cliff-2.10.1/git-cliff /usr/local/bin/
           git-cliff --config cliff.toml --verbose --latest --strip header --output CHANGELOG_RELEASE.md
-
       - name: Create Release and Upload
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -133,4 +104,4 @@ jobs:
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file target/debian/*.deb
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file cfait-linux-*.tar.gz
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file cfait-windows-*.zip
-          tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file PKGBU_
+          tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file PKGBUILD-release

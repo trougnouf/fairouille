@@ -2,46 +2,26 @@ name: Test and Lint
 
 on: [push, pull_request]
 
-env:
-  # 1. Use lld linker (faster, less memory)
-  # 2. Reduce debug info to line-tables (debuginfo=1) to save ~2GB+ RAM during linking
-  RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C debuginfo=1"
-  # Limit concurrency to prevent CPU/RAM spikes
-  CARGO_BUILD_JOBS: 2
-
 jobs:
   test:
-    runs-on: codeberg-medium
+    runs-on: self-hosted-rust
+    
+    container:
+      image: ghcr.io/catthehacker/ubuntu:rust-latest
+      volumes:
+        - cargo-registry:/usr/local/cargo/registry
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust Toolchain
-        uses: https://codeberg.org/wackbyte/rust-toolchain@trunk
-        with:
-          toolchain: stable
-          components: clippy
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # FIX: Add 'lld' to the install list
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev lld
+          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 
       - name: Run linter (clippy)
         run: cargo clippy --all-features -- -D warnings
 
       - name: Run unit tests
-        # The env var RUSTFLAGS defined at the top will automatically apply here
         run: cargo test --all-features --verbose
