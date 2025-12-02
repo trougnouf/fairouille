@@ -6,6 +6,13 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Global build optimizations to save RAM
+env:
+  # Use lld linker and reduce debug info to the absolute minimum
+  RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C debuginfo=0"
+  # Tell cargo to use less concurrency to save RAM
+  CARGO_BUILD_JOBS: 2
+
 jobs:
   build-and-release:
     runs-on: codeberg-medium
@@ -35,21 +42,20 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # FIX: Add 'lld' here as well
           sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev mingw-w64 lld
 
-      - name: Install Packaging Tools
-        run: cargo install cargo-deb
+      - name: Install cargo-deb (from .deb)
+        run: |
+          wget https://github.com/kornelski/cargo-deb/releases/download/v3.6.2/cargo-deb_3.6.2-1_amd64.deb
+          sudo dpkg -i cargo-deb_3.6.2-1_amd64.deb
 
       # --- BUILD LINUX ---
       - name: Build Linux (Release)
-        env:
-          # Use lld for Linux release build to prevent OOM
-          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: cargo build --release --features gui
 
       - name: Create Linux Packages
         run: |
+          # The command remains the same as dpkg puts it in the PATH
           cargo deb --no-build --features gui 
           
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
@@ -67,10 +73,8 @@ jobs:
           cp assets/cfait.svg "$STAGING/"
           tar -czvf "cfait-linux-$VERSION.tar.gz" "$STAGING"
 
-          # Prepare Arch PKGBUILD if tagged
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             SOURCE_URL="${{ github.server_url }}/${{ github.repository }}/archive/${{ github.ref_name }}.tar.gz"
-            # We use curl -L -O to handle redirects properly
             curl -L -O "$SOURCE_URL"
             HASH=$(sha256sum "${{ github.ref_name }}.tar.gz" | awk '{print $1}')
             sed -i "s/'SKIP'/'$HASH'/" packaging/arch/PKGBUILD
@@ -79,8 +83,9 @@ jobs:
 
       # --- BUILD WINDOWS (CROSS) ---
       - name: Build Windows (Cross-compile)
+        env:
+          RUSTFLAGS: "" # Reset flags for Windows build
         run: |
-          # MinGW usually uses its own ld, so we don't pass -fuse-ld=lld here to be safe
           cargo build --release --target x86_64-pc-windows-gnu --features gui
 
       - name: Package Windows
@@ -104,7 +109,6 @@ jobs:
       - name: Install Tea (Gitea CLI)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # Verify the version on https://gitea.com/gitea/tea/releases
           wget -O tea https://dl.gitea.io/tea/0.9.2/tea-0.9.2-linux-amd64
           chmod +x tea
           sudo mv tea /usr/local/bin/
@@ -129,4 +133,4 @@ jobs:
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file target/debian/*.deb
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file cfait-linux-*.tar.gz
           tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file cfait-windows-*.zip
-          tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file PKGBUILD-release
+          tea release upload --repo ${{ github.repository }} --tag ${{ github.ref_name }} --file PKGBU_

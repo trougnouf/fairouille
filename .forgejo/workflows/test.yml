@@ -2,11 +2,12 @@ name: Test and Lint
 
 on: [push, pull_request]
 
-# Set global environment variables to optimize the build
 env:
   # 1. Use lld linker (faster, less memory)
-  # 2. Reduce debug info to line-tables (saves huge amount of RAM)
+  # 2. Reduce debug info to line-tables (debuginfo=1) to save ~2GB+ RAM during linking
   RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C debuginfo=1"
+  # Limit concurrency to prevent CPU/RAM spikes
+  CARGO_BUILD_JOBS: 2
 
 jobs:
   test:
@@ -42,4 +43,5 @@ jobs:
         run: cargo clippy --all-features -- -D warnings
 
       - name: Run unit tests
+        # The env var RUSTFLAGS defined at the top will automatically apply here
         run: cargo test --all-features --verbose
