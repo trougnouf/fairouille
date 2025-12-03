@@ -464,7 +464,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
             .id(app.scrollable_id.clone()),
     );
 
-    container(main_col.spacing(20).padding(20).max_width(800)).into()
+    container(main_col.spacing(20).padding(20)).into()
 }
 
 fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
