@@ -275,6 +275,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 InputMode::Searching => (" Search ", "/ ", Color::Green),
                 InputMode::Editing => (" Edit Title ", "> ", Color::Magenta),
                 InputMode::EditingDescription => (" Edit Description ", "📝 ", Color::Blue),
+                InputMode::Creating => {
+                    // If app_state.creating_child_of is Some, change title color or text
+                    if state.creating_child_of.is_some() {
+                        (" Create Child Task ", "> ", Color::LightYellow)
+                    } else {
+                        (" Create Task ", "> ", Color::Yellow)
+                    }
+                }
                 _ => (" Create Task ", "> ", Color::Yellow),
             };
 

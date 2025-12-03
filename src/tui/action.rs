@@ -19,8 +19,9 @@ pub enum Action {
     DeleteTask(Task),
     Refresh,
     Quit,
-    MoveTask(Task, String), // Task, New Calendar Href
-    MigrateLocal(String),   // target_href
+    MoveTask(Task, String),   // Task, New Calendar Href
+    StartCreateChild(String), // Parent Task UID
+    MigrateLocal(String),     // target_href
     ToggleCalendarVisibility(String),
     IsolateCalendar(String),
 }

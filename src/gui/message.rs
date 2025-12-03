@@ -71,6 +71,7 @@ pub enum Message {
 
     YankTask(String),
     ClearYank,
+    StartCreateChild(String),
     AddDependency(String),
     MakeChild(String),
     RemoveParent(String),

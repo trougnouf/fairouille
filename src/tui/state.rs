@@ -56,6 +56,7 @@ pub struct AppState {
     pub export_targets: Vec<CalendarListEntry>,
 
     pub yanked_uid: Option<String>,
+    pub creating_child_of: Option<String>,
     pub tag_aliases: HashMap<String, Vec<String>>,
 
     // Track unsynced status
@@ -102,6 +103,8 @@ impl AppState {
             move_selection_state: ListState::default(),
             move_targets: Vec::new(),
             yanked_uid: None,
+            creating_child_of: None,
+
             tag_aliases: HashMap::new(),
             export_selection_state: ListState::default(),
             export_targets: Vec::new(),

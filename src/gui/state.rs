@@ -55,6 +55,7 @@ pub struct GuiApp {
     pub description_value: text_editor::Content,
     pub search_value: String,
     pub editing_uid: Option<String>,
+    pub creating_child_of: Option<String>,
     pub expanded_tasks: HashSet<String>,
     pub unsynced_changes: bool,
 
@@ -106,6 +107,7 @@ impl Default for GuiApp {
             description_value: text_editor::Content::new(), // Initialized empty
             search_value: String::new(),
             editing_uid: None,
+            creating_child_of: None,
             expanded_tasks: HashSet::new(),
             unsynced_changes: false,
 

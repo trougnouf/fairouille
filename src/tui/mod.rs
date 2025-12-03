@@ -491,6 +491,10 @@ pub async fn run() -> Result<()> {
                         }
                     }
                 }
+                Action::StartCreateChild(_parent_uid) => {
+                    // Logic handled in UI state, not network thread, unless we need to verify parent exists?
+                    // For now, no-op in network thread.
+                }
             }
         }
     });
@@ -552,6 +556,12 @@ pub async fn run() -> Result<()> {
                                 if let Some(href) = target_href {
                                     let mut task = Task::new(&summary, &app_state.tag_aliases);
                                     task.calendar_href = href.clone();
+
+                                    // PARENT LOGIC
+                                    if let Some(p_uid) = &app_state.creating_child_of {
+                                        task.parent_uid = Some(p_uid.clone());
+                                    }
+
                                     if let Some(list) = app_state.store.calendars.get_mut(&href) {
                                         list.push(task.clone());
                                     }
@@ -560,11 +570,13 @@ pub async fn run() -> Result<()> {
                                 }
                                 app_state.mode = InputMode::Normal;
                                 app_state.reset_input();
+                                app_state.creating_child_of = None; // Reset
                             }
                         }
                         KeyCode::Esc => {
                             app_state.mode = InputMode::Normal;
                             app_state.reset_input();
+                            app_state.creating_child_of = None; // Reset
                         }
                         KeyCode::Char(c) => app_state.enter_char(c),
                         KeyCode::Backspace => app_state.delete_char(),
@@ -781,6 +793,16 @@ pub async fn run() -> Result<()> {
                                     }
                                     app_state.refresh_filtered_view();
                                 }
+                            }
+                        }
+                        KeyCode::Char('C') => {
+                            if app_state.active_focus == Focus::Main
+                                && let Some(task) = app_state.get_selected_task().cloned()
+                            {
+                                app_state.mode = InputMode::Creating;
+                                app_state.reset_input();
+                                app_state.creating_child_of = Some(task.uid.clone());
+                                app_state.message = format!("New Child of '{}'...", task.summary);
                             }
                         }
                         KeyCode::Char('/') => {

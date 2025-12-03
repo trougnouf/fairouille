@@ -466,6 +466,12 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
 fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
     let input_placeholder = if app.editing_uid.is_some() {
         "Edit Title...".to_string()
+    } else if let Some(parent_uid) = &app.creating_child_of {
+        let parent_name = app
+            .store
+            .get_summary(parent_uid)
+            .unwrap_or("Parent".to_string());
+        format!("New Child of '{}'...", parent_name)
     } else {
         // Show which calendar we are writing to
         let target_name = app
@@ -702,24 +708,32 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
 
     if let Some(yanked) = &app.yanked_uid {
         if *yanked != task.uid {
+            // OTHER TASKS: Show Block / Link Child
             actions = actions.push(
-                button(text("Block").size(14))
+                button(icon::icon(icon::BLOCKED).size(14)) // Icon Block
                     .style(button::secondary)
                     .padding(4)
                     .on_press(Message::AddDependency(task.uid.clone())),
             );
             actions = actions.push(
-                button(text("Child").size(14))
+                button(icon::icon(icon::CHILD).size(14)) // Icon Child (Existing)
                     .style(button::secondary)
                     .padding(4)
                     .on_press(Message::MakeChild(task.uid.clone())),
             );
         } else {
+            // YANKED TASK (Parent): Show Unlink + Create Child
             actions = actions.push(
                 button(icon::icon(icon::UNLINK).size(14))
                     .style(button::primary)
                     .padding(4)
                     .on_press(Message::ClearYank),
+            );
+            actions = actions.push(
+                button(icon::icon(icon::CREATE_CHILD).size(14))
+                    .style(button::primary)
+                    .padding(4)
+                    .on_press(Message::StartCreateChild(task.uid.clone())),
             );
         }
     } else {
@@ -955,7 +969,7 @@ fn view_task_row<'a>(app: &'a GuiApp, index: usize, task: &'a TodoTask) -> Eleme
             );
         }
 
-        // 2. Parent (NEW: Show parent and allow detaching)
+        // 2. Parent (Show parent and allow detaching)
         if let Some(p_uid) = &task.parent_uid {
             let p_name = app
                 .store

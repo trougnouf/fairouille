@@ -1,8 +1,8 @@
-
+// File: ./README.md
 # Cfait
 > Take control of your TODO list
 
-**Cfait** is a powerful, simple, elegant, and lightweight CalDAV task manager, written in Rust.
+**Cfait** is a powerful, simple, elegant, and lightweight CalDAV tasks manager, written in Rust.
 
 It features both an efficient **TUI (Terminal UI)** and a modern **GUI (Graphical UI)** for desktop integration.
 
@@ -22,7 +22,7 @@ It features both an efficient **TUI (Terminal UI)** and a modern **GUI (Graphica
 *   **Tag Support:** Organize tasks across all calendars using tags (e.g., `#woodworking`, `#project_potato`).
 *   **Tag Aliases:** Define shortcuts (e.g., `#groceries`) that automatically expand into multiple tags (e.g., `#groceries`, `#shopping`, `#home`).
 *   **Dependencies:** Link tasks using RFC 9253 (Blocked By) logic.
-*   **Hierarchy Support:** Create sub-tasks and organize nested lists easily.
+*   **Hierarchy Support:** Create sub-tasks directly from parents and organize nested lists easily.
 *   **Multiple Calendars:** Seamlessly switch between "Work", "Personal", and other lists, or move tasks between them.
 *   **Offline & Local First:** Optimistic UI updates mean you never wait for the server. Possibility to use the app immediately without a server; a persistent "Local" calendar stores its tasks on disk.
 *   **Easy Migration:** When ready, export all tasks from the Local calendar to a CalDAV server with a single click (or keypress).
@@ -164,6 +164,7 @@ cfait = ["dev", "rust"]           # Typing #cfait will add #cfait, #dev and #rus
 | | `s` | **Start / Pause** (Mark In-Process) |
 | | `x` | **Cancel** Task |
 | | `a` | **Add** Task (Type name, press Enter) |
+| | `C` | **Create Child** (Create new task linked as child of current, Shift+c) |
 | | `e` | **Edit** Task Title |
 | | `E` | **Edit** Task Description (Shift+e) |
 | | `d` | **Delete** Task |
@@ -229,4 +230,3 @@ Commits are pushed to the following repositories. The automated build pipelines 
     *   **Environment:** Builds run on **Ubuntu 24.04** and **Windows Server**.
     *   **Artifacts:** Native Debian/Ubuntu package, Native Windows build, PKGBUILD.
 *   **[GitLab](https://gitlab.com/trougnouf/cfait)**
-```

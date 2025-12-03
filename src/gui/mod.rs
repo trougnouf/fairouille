@@ -576,6 +576,13 @@ impl GuiApp {
                 Task::none()
             }
 
+            Message::StartCreateChild(parent_uid) => {
+                self.creating_child_of = Some(parent_uid);
+                self.input_value.clear();
+                // We keep the yank status active so the user can still see which task is the parent
+                Task::none()
+            }
+
             Message::SubmitTask => {
                 if !self.input_value.is_empty() {
                     if let Some(edit_uid) = &self.editing_uid {
@@ -618,6 +625,17 @@ impl GuiApp {
                         }
                     } else {
                         let mut new_task = TodoTask::new(&self.input_value, &self.tag_aliases);
+
+                        // NEW CHILD LOGIC
+                        if let Some(parent_uid) = self.creating_child_of.clone() {
+                            new_task.parent_uid = Some(parent_uid.clone());
+                            // Clear states
+                            if self.yanked_uid.as_ref() == Some(&parent_uid) {
+                                self.yanked_uid = None;
+                            }
+                            self.creating_child_of = None;
+                        }
+
                         let target_href = if let Some(h) = &self.active_cal_href {
                             h.clone()
                         } else if let Some(first) = self.calendars.first() {
@@ -791,6 +809,7 @@ impl GuiApp {
                 self.input_value.clear();
                 self.description_value = iced::widget::text_editor::Content::new();
                 self.editing_uid = None;
+                self.creating_child_of = None; // Cancel child creation too
                 Task::none()
             }
             Message::DeleteTask(index) => {
