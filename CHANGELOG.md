@@ -1,6 +1,24 @@
 # Changelog
 
-## [0.2.4] - 2025-12-02
+## [0.2.5] - 2025-12-04
+
+### 🚀 Features
+
+- *(workflow)* Streamline child task creation from parent in GUI and TUI
+- *(tui)* Add toggleable, dynamic, and comprehensive help screen
+- *(ui)* Implement auto-jump to new tasks (TUI & GUI) and better scrollable logic
+- *(GUI)* Tab between fields in the settings window
+
+### 🚜 Refactor
+
+- Split model, client, and gui view into granular submodules
+- Modularize TUI logic into network actor and event handlers
+- *(core)* Decouple search matching logic from store to model domain
+
+### 🎨 Styling
+
+- *(GUI)* Allow main content area to expand with window width
+## [0.2.4] - 2025-12-03
 
 ### 🚀 Features
 
@@ -20,6 +38,8 @@
 - Reduce memory usage by not compiling cargo-deb, 2-threads
 - Self-hosted runner
 - *(release)* Add cmake and nasm to fix windows cross-compilation and fix shell script syntax
+- *(release)* Update changelog for v0.2.4
+- Release cfait version 0.2.4
 ## [0.2.3] - 2025-12-01
 
 ### 🚀 Features
