@@ -1,7 +1,7 @@
 // File: ./src/gui/message.rs
 use crate::client::RustyClient;
 use crate::config::Config;
-use crate::gui::state::SidebarMode;
+use crate::gui::state::{ResizeDirection, SidebarMode};
 use crate::model::{CalendarListEntry, Task as TodoTask};
 use iced::widget::text_editor;
 
@@ -93,4 +93,16 @@ pub enum Message {
     ToggleAllCalendars(bool),
 
     TabPressed(bool),
+
+    // Window Controls
+    WindowDragged,
+    MinimizeWindow,
+    CloseWindow,
+    WindowResized(iced::Size),
+    WindowMoved(iced::Point), // Added
+
+    // Resize
+    ResizeStart(ResizeDirection),
+    ResizeUpdate(iced::Point),
+    ResizeEnd,
 }

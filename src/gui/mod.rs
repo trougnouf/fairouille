@@ -24,6 +24,7 @@ pub fn run() -> iced::Result {
     .subscription(GuiApp::subscription)
     .theme(GuiApp::theme)
     .window(window::Settings {
+        decorations: false, // <--- Disable OS Top Bar
         platform_specific: window::settings::PlatformSpecific {
             #[cfg(target_os = "linux")]
             application_id: String::from("cfait"),

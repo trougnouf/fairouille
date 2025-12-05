@@ -6,15 +6,15 @@ pub mod task_row;
 
 use crate::gui::icon;
 use crate::gui::message::Message;
-use crate::gui::state::{AppState, GuiApp, SidebarMode};
+use crate::gui::state::{AppState, GuiApp, ResizeDirection, SidebarMode};
 use crate::gui::view::help::view_help;
 use crate::gui::view::settings::view_settings;
 use crate::gui::view::sidebar::{view_sidebar_calendars, view_sidebar_categories};
 use crate::gui::view::task_row::view_task_row;
 use crate::storage::LOCAL_CALENDAR_HREF;
 
-use iced::widget::{container, row, scrollable, text};
-use iced::{Background, Color, Element, Length, Theme};
+use iced::widget::{MouseArea, column, container, row, scrollable, stack, svg, text};
+use iced::{Background, Color, Element, Length, Theme, mouse};
 
 pub fn root_view(app: &GuiApp) -> Element<'_, Message> {
     match app.state {
@@ -27,21 +27,138 @@ pub fn root_view(app: &GuiApp) -> Element<'_, Message> {
         AppState::Onboarding | AppState::Settings => view_settings(app),
         AppState::Help => view_help(),
         AppState::Active => {
-            let layout = row![
+            // Main App Layout
+            let content_layout = row![
                 view_sidebar(app),
                 iced::widget::Rule::vertical(1),
                 container(view_main_content(app))
                     .width(Length::Fill)
                     .center_x(Length::Fill)
             ];
-            container(layout)
+
+            let main_container = container(content_layout)
                 .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+                .height(Length::Fill);
+
+            // --- Resize Grips ---
+            // Edge thickness
+            let t = 6.0;
+            // Corner size
+            let c = 12.0;
+
+            // Edges
+            let n_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(t)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::North))
+            .interaction(mouse::Interaction::ResizingVertically);
+
+            let s_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(t)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::South))
+            .interaction(mouse::Interaction::ResizingVertically);
+
+            let e_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(t))
+                    .height(Length::Fill),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::East))
+            .interaction(mouse::Interaction::ResizingHorizontally);
+
+            let w_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(t))
+                    .height(Length::Fill),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::West))
+            .interaction(mouse::Interaction::ResizingHorizontally);
+
+            // Corners
+            let nw_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(c))
+                    .height(Length::Fixed(c)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::NorthWest))
+            .interaction(mouse::Interaction::ResizingDiagonallyDown); // Visually maps to up-left
+
+            let ne_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(c))
+                    .height(Length::Fixed(c)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::NorthEast))
+            .interaction(mouse::Interaction::ResizingDiagonallyUp); // Visually maps to up-right
+
+            let sw_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(c))
+                    .height(Length::Fixed(c)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::SouthWest))
+            .interaction(mouse::Interaction::ResizingDiagonallyUp);
+
+            let se_grip = MouseArea::new(
+                container(text(""))
+                    .width(Length::Fixed(c))
+                    .height(Length::Fixed(c)),
+            )
+            .on_press(Message::ResizeStart(ResizeDirection::SouthEast))
+            .interaction(mouse::Interaction::ResizingDiagonallyDown);
+
+            stack![
+                main_container,
+                // Edges (aligned)
+                container(n_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_y(iced::alignment::Vertical::Top),
+                container(s_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_y(iced::alignment::Vertical::Bottom),
+                container(e_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right),
+                container(w_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Left),
+                // Corners (aligned on top of edges)
+                container(nw_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Left)
+                    .align_y(iced::alignment::Vertical::Top),
+                container(ne_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .align_y(iced::alignment::Vertical::Top),
+                container(sw_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Left)
+                    .align_y(iced::alignment::Vertical::Bottom),
+                container(se_grip)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .align_y(iced::alignment::Vertical::Bottom),
+            ]
+            .into()
         }
     }
 }
 
+// ... [view_sidebar is unchanged] ...
 fn view_sidebar(app: &GuiApp) -> Element<'_, Message> {
     // 1. Tab Switcher
     let btn_cals = iced::widget::button(
@@ -107,10 +224,9 @@ fn view_sidebar(app: &GuiApp) -> Element<'_, Message> {
     ]
     .spacing(5);
 
-    let sidebar_inner =
-        iced::widget::column![tabs, scrollable(content).height(Length::Fill), footer]
-            .spacing(10)
-            .padding(10);
+    let sidebar_inner = column![tabs, scrollable(content).height(Length::Fill), footer]
+        .spacing(10)
+        .padding(10);
 
     container(sidebar_inner)
         .width(220)
@@ -126,13 +242,14 @@ fn view_sidebar(app: &GuiApp) -> Element<'_, Message> {
 }
 
 fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
+    // --- 1. PREPARE HEADER DATA ---
     let title_text = if app.loading {
         "Loading...".to_string()
     } else if app.active_cal_href.is_none() {
         if app.selected_categories.is_empty() {
             "All Tasks".to_string()
         } else {
-            format!("Tasks ({})", app.tasks.len())
+            "Tasks".to_string()
         }
     } else {
         app.calendars
@@ -142,11 +259,44 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
             .unwrap_or("Calendar".to_string())
     };
 
-    let mut header_icons = row![].spacing(10).align_y(iced::Alignment::Center);
+    let task_count = app.tasks.len();
+    let mut subtitle = format!("{} Tasks", task_count);
+
+    if !app.search_value.is_empty() {
+        subtitle.push_str(&format!(" | Search: '{}'", app.search_value));
+    } else if !app.selected_categories.is_empty() {
+        let tag_count = app.selected_categories.len();
+        if tag_count == 1 {
+            subtitle.push_str(&format!(
+                " | Tag: #{}",
+                app.selected_categories.iter().next().unwrap()
+            ));
+        } else {
+            subtitle.push_str(&format!(" | {} Tags", tag_count));
+        }
+    }
+
+    // --- 2. BUILD HEADER ROW ---
+
+    // Left Section
+    let title_group = row![
+        svg(svg::Handle::from_memory(icon::LOGO))
+            .width(24)
+            .height(24),
+        text(title_text).size(20).font(iced::Font::DEFAULT)
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+
+    let left_drag_area = MouseArea::new(title_group).on_press(Message::WindowDragged);
+
+    let mut left_section = row![left_drag_area]
+        .spacing(10)
+        .align_y(iced::Alignment::Center);
 
     if app.unsynced_changes {
-        header_icons = header_icons.push(
-            container(text("Unsynced").size(12).color(Color::WHITE))
+        left_section = left_section.push(
+            container(text("Unsynced").size(10).color(Color::WHITE))
                 .style(|_| container::Style {
                     background: Some(Color::from_rgb(0.8, 0.5, 0.0).into()),
                     border: iced::Border {
@@ -155,24 +305,61 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
                     },
                     ..Default::default()
                 })
-                .padding(5),
+                .padding(3),
         );
     }
 
-    header_icons = header_icons.push(
-        iced::widget::button(icon::icon(icon::REFRESH).size(20))
-            .style(iced::widget::button::secondary)
-            .padding(6)
+    left_section = left_section.push(
+        iced::widget::button(icon::icon(icon::REFRESH).size(16))
+            .style(iced::widget::button::text)
+            .padding(4)
             .on_press(Message::Refresh),
     );
 
+    // Middle Section
+    let subtitle_text = text(subtitle)
+        .size(14)
+        .color(Color::from_rgb(0.6, 0.6, 0.6));
+
+    let middle_container = container(subtitle_text)
+        .width(Length::Fill)
+        .height(Length::Shrink)
+        .center_x(Length::Fill)
+        .center_y(Length::Shrink);
+
+    let middle_drag = MouseArea::new(middle_container).on_press(Message::WindowDragged);
+
+    // Right Section
     let search_input = iced::widget::text_input("Search...", &app.search_value)
         .on_input(Message::SearchChanged)
         .padding(5)
-        .size(16);
+        .size(14)
+        .width(Length::Fixed(180.0));
 
+    let window_controls = row![
+        iced::widget::button(icon::icon(icon::WINDOW_MINIMIZE).size(14))
+            .style(iced::widget::button::text)
+            .padding(8)
+            .on_press(Message::MinimizeWindow),
+        iced::widget::button(icon::icon(icon::CROSS).size(14))
+            .style(iced::widget::button::danger)
+            .padding(8)
+            .on_press(Message::CloseWindow)
+    ]
+    .spacing(0);
+
+    let right_section = row![search_input, window_controls]
+        .spacing(10)
+        .align_y(iced::Alignment::Center);
+
+    // Assembly
+    let header_row = row![left_section, middle_drag, right_section]
+        .spacing(10)
+        .padding(10)
+        .align_y(iced::Alignment::Center);
+
+    // --- 3. EXPORT UI ---
     let mut export_ui: Element<'_, Message> = row![].into();
-
     if app.active_cal_href.as_deref() == Some(LOCAL_CALENDAR_HREF) {
         let targets: Vec<_> = app
             .calendars
@@ -197,26 +384,20 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
                         .on_press(Message::MigrateLocalTo(cal.href.clone())),
                 );
             }
-            export_ui = row.into();
+            export_ui = container(row)
+                .padding(iced::Padding {
+                    left: 10.0,
+                    bottom: 5.0,
+                    ..Default::default()
+                })
+                .into();
         }
     }
 
-    let header = row![
-        iced::widget::column![
-            row![text(title_text).size(40), header_icons]
-                .spacing(15)
-                .align_y(iced::Alignment::Center),
-            export_ui
-        ]
-        .spacing(5),
-        iced::widget::horizontal_space(),
-        search_input.width(200)
-    ]
-    .align_y(iced::Alignment::Center);
-
+    // --- 4. MAIN CONTENT ---
     let input_area = view_input_area(app);
 
-    let mut main_col = iced::widget::column![header, input_area];
+    let mut main_col = column![header_row, export_ui, input_area];
 
     if let Some(err) = &app.error_msg {
         let error_content = row![
@@ -239,7 +420,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
         );
     }
 
-    let tasks_view = iced::widget::column(
+    let tasks_view = column(
         app.tasks
             .iter()
             .enumerate()
@@ -254,9 +435,13 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
             .id(app.scrollable_id.clone()),
     );
 
-    container(main_col.spacing(20).padding(20)).into()
+    container(main_col)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
+// ... [view_input_area is unchanged from previous] ...
 fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
     let input_placeholder = if app.editing_uid.is_some() {
         "Edit Title...".to_string()
@@ -286,7 +471,7 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
         .padding(10)
         .size(20);
 
-    if app.editing_uid.is_some() {
+    let inner_content: Element<'_, Message> = if app.editing_uid.is_some() {
         let input_desc = iced::widget::text_editor(&app.description_value)
             .placeholder("Notes...")
             .on_action(Message::DescriptionChanged)
@@ -347,10 +532,12 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
             }
         }
 
-        iced::widget::column![top_bar, input_title, input_desc, move_element]
+        column![top_bar, input_title, input_desc, move_element]
             .spacing(10)
             .into()
     } else {
-        iced::widget::column![input_title].spacing(5).into()
-    }
+        column![input_title].spacing(5).into()
+    };
+
+    container(inner_content).padding(10).into()
 }

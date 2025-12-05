@@ -68,7 +68,15 @@ pub fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
         | Message::ToggleIncludeUnsetDuration(_)
         | Message::ToggleDetails(_)
         | Message::OpenHelp
-        | Message::CloseHelp => view::handle(app, message),
+        | Message::CloseHelp
+        | Message::WindowDragged
+        | Message::MinimizeWindow
+        | Message::CloseWindow
+        | Message::ResizeStart(_)
+        | Message::ResizeUpdate(_)
+        | Message::ResizeEnd
+        | Message::WindowResized(_)
+        | Message::WindowMoved(_) => view::handle(app, message),
 
         Message::Refresh
         | Message::Loaded(_)

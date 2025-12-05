@@ -22,9 +22,20 @@ pub enum SidebarMode {
     Categories,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ResizeDirection {
+    North,
+    South,
+    East,
+    West,
+    NorthEast,
+    NorthWest,
+    SouthEast,
+    SouthWest,
+}
+
 pub struct GuiApp {
     pub state: AppState,
-    // ... [Rest of struct fields]
     pub store: TaskStore,
     pub tasks: Vec<TodoTask>,
     pub calendars: Vec<CalendarListEntry>,
@@ -75,6 +86,11 @@ pub struct GuiApp {
     pub ob_sort_months_input: String,
     pub ob_insecure: bool,
     pub scrollable_id: scrollable::Id,
+
+    // Window Resizing State
+    pub resize_direction: Option<ResizeDirection>,
+    pub current_window_size: iced::Size,
+    pub current_window_pos: iced::Point, // Added to support Left/Top resizing
 }
 
 impl Default for GuiApp {
@@ -123,6 +139,10 @@ impl Default for GuiApp {
             ob_default_cal: None,
             ob_insecure: false,
             scrollable_id: scrollable::Id::unique(),
+
+            resize_direction: None,
+            current_window_size: iced::Size::new(800.0, 600.0),
+            current_window_pos: iced::Point::new(0.0, 0.0),
         }
     }
 }

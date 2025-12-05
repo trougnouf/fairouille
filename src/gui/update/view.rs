@@ -1,9 +1,9 @@
 // File: ./src/gui/update/view.rs
 use crate::gui::async_ops::*;
 use crate::gui::message::Message;
-use crate::gui::state::{AppState, GuiApp, SidebarMode};
+use crate::gui::state::{AppState, GuiApp, ResizeDirection, SidebarMode};
 use crate::gui::update::common::{refresh_filtered_tasks, save_config};
-use iced::Task;
+use iced::{Point, Size, Task, window};
 
 pub fn handle(app: &mut GuiApp, message: Message) -> Task<Message> {
     match message {
@@ -177,6 +177,135 @@ pub fn handle(app: &mut GuiApp, message: Message) -> Task<Message> {
         }
         Message::CloseHelp => {
             app.state = AppState::Active;
+            Task::none()
+        }
+        Message::WindowDragged => window::get_latest().then(|id| {
+            if let Some(id) = id {
+                window::drag(id)
+            } else {
+                Task::none()
+            }
+        }),
+        Message::MinimizeWindow => window::get_latest().then(|id| {
+            if let Some(id) = id {
+                window::minimize(id, true)
+            } else {
+                Task::none()
+            }
+        }),
+        Message::CloseWindow => window::get_latest().then(|id| {
+            if let Some(id) = id {
+                window::close(id)
+            } else {
+                Task::none()
+            }
+        }),
+        // Resize Logic
+        Message::ResizeStart(direction) => {
+            app.resize_direction = Some(direction);
+            // We do not set last_cursor_pos here anymore, we rely on the implicit delta from the edge
+            // or we could snap it. For manual resize implementation, capturing the start is enough.
+            Task::none()
+        }
+        Message::ResizeUpdate(cursor_pos) => {
+            if let Some(dir) = app.resize_direction {
+                let current_size = app.current_window_size;
+                let current_win_pos = app.current_window_pos;
+
+                let min_width = 400.0;
+                let min_height = 300.0;
+
+                let mut new_width = current_size.width;
+                let mut new_height = current_size.height;
+                let mut new_x = current_win_pos.x;
+                let mut new_y = current_win_pos.y;
+                let mut move_needed = false;
+
+                // Delta X
+                // For Right/East: cursor_pos.x is the new width
+                // For Left/West: cursor_pos.x is how much we shift X and shrink Width
+
+                match dir {
+                    ResizeDirection::East
+                    | ResizeDirection::NorthEast
+                    | ResizeDirection::SouthEast => {
+                        new_width = cursor_pos.x.max(min_width);
+                    }
+                    ResizeDirection::West
+                    | ResizeDirection::NorthWest
+                    | ResizeDirection::SouthWest => {
+                        // cursor_pos.x is relative to current window left edge (0).
+                        // If -5, we move window -5 and increase width +5.
+                        // However, we must ensure we don't shrink below min_width.
+                        let potential_width = current_size.width - cursor_pos.x;
+                        if potential_width >= min_width {
+                            new_width = potential_width;
+                            new_x += cursor_pos.x;
+                            move_needed = true;
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Delta Y
+                match dir {
+                    ResizeDirection::South
+                    | ResizeDirection::SouthEast
+                    | ResizeDirection::SouthWest => {
+                        new_height = cursor_pos.y.max(min_height);
+                    }
+                    ResizeDirection::North
+                    | ResizeDirection::NorthEast
+                    | ResizeDirection::NorthWest => {
+                        let potential_height = current_size.height - cursor_pos.y;
+                        if potential_height >= min_height {
+                            new_height = potential_height;
+                            new_y += cursor_pos.y;
+                            move_needed = true;
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Apply changes
+                let mut tasks = Vec::new();
+
+                // Only resize if dimensions changed
+                if new_width != current_size.width || new_height != current_size.height {
+                    tasks.push(window::get_latest().then(move |id| {
+                        if let Some(id) = id {
+                            window::resize(id, Size::new(new_width, new_height))
+                        } else {
+                            Task::none()
+                        }
+                    }));
+                }
+
+                // Only move if needed
+                if move_needed {
+                    tasks.push(window::get_latest().then(move |id| {
+                        if let Some(id) = id {
+                            window::move_to(id, Point::new(new_x, new_y))
+                        } else {
+                            Task::none()
+                        }
+                    }));
+                }
+
+                return Task::batch(tasks);
+            }
+            Task::none()
+        }
+        Message::ResizeEnd => {
+            app.resize_direction = None;
+            Task::none()
+        }
+        Message::WindowResized(size) => {
+            app.current_window_size = size;
+            Task::none()
+        }
+        Message::WindowMoved(point) => {
+            app.current_window_pos = point;
             Task::none()
         }
         _ => Task::none(),

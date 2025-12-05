@@ -50,7 +50,7 @@ ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.29", optional = true }
 
 # --- GUI ONLY (Future) ---
-iced = { version = "0.13", features = ["tokio"], optional = true }
+iced = { version = "0.13", features = ["tokio", "svg"], optional = true }
 
 [dev-dependencies]
 mockito = "1.7" # For mocking the HTTP server
