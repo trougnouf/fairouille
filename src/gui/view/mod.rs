@@ -278,7 +278,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
 
     // --- 2. BUILD HEADER ROW ---
 
-    // Left Section
+    // Left Section (Title + Badges + Refresh)
     let title_group = row![
         svg(svg::Handle::from_memory(icon::LOGO))
             .width(24)
@@ -288,9 +288,10 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
     .spacing(10)
     .align_y(iced::Alignment::Center);
 
-    let left_drag_area = MouseArea::new(title_group).on_press(Message::WindowDragged);
+    // We no longer use individual MouseAreas here.
+    // Instead, we group elements into a row, and wrap the entire header later.
 
-    let mut left_section = row![left_drag_area]
+    let mut left_section = row![title_group]
         .spacing(10)
         .align_y(iced::Alignment::Center);
 
@@ -316,7 +317,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
             .on_press(Message::Refresh),
     );
 
-    // Middle Section
+    // Middle Section (Subtitle)
     let subtitle_text = text(subtitle)
         .size(14)
         .color(Color::from_rgb(0.6, 0.6, 0.6));
@@ -327,9 +328,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
         .center_x(Length::Fill)
         .center_y(Length::Shrink);
 
-    let middle_drag = MouseArea::new(middle_container).on_press(Message::WindowDragged);
-
-    // Right Section
+    // Right Section (Search + Window Controls)
     let search_input = iced::widget::text_input("Search...", &app.search_value)
         .on_input(Message::SearchChanged)
         .padding(5)
@@ -353,10 +352,13 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
         .align_y(iced::Alignment::Center);
 
     // Assembly
-    let header_row = row![left_section, middle_drag, right_section]
+    let header_row = row![left_section, middle_container, right_section]
         .spacing(10)
         .padding(10)
         .align_y(iced::Alignment::Center);
+
+    // Wrap the entire header in a MouseArea to enable dragging on any empty space (padding, spacers, text)
+    let header_drag_area = MouseArea::new(header_row).on_press(Message::WindowDragged);
 
     // --- 3. EXPORT UI ---
     let mut export_ui: Element<'_, Message> = row![].into();
@@ -397,7 +399,7 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
     // --- 4. MAIN CONTENT ---
     let input_area = view_input_area(app);
 
-    let mut main_col = column![header_row, export_ui, input_area];
+    let mut main_col = column![header_drag_area, export_ui, input_area];
 
     if let Some(err) = &app.error_msg {
         let error_content = row![
