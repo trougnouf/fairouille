@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.6] - 2025-12-04
+## [0.2.7] - 2025-12-06
 
 ### 🚀 Features
 
@@ -10,20 +10,41 @@
 - *(tui)* Re-use '*' keybinding to clear all selected tags in tags view
 - *(gui)* Add 'Clear All Tags' button to sidebar
 - *(GUI)* Add help screen, use icons for help and settings
+- *(gui)* Implement custom draggable and resizable client-side decorations
+- *(gui)* Make the entire window header draggable
 
 ### 🐛 Bug Fixes
 
 - *(tui)* Enable cursor movement in task creation input field
+- *(gui)* Swap delete/cancel icon positions and adjust icons padding to prevent cropping
 
 ### 🚜 Refactor
 
 - *(gui)* Decompose monolithic update logic into domain-specific modules
+- *(gui)* Upgrade to iced 0.14-dev for native window resizing support
+
+### 📚 Documentation
+
+- Add icon to README
 
 ### 🎨 Styling
 
 - *(tui)* Improve highlight contrast and right-align tags for readability
 - Update logo (nerd-fonts cat -> Font Awesome, CC-BY-SA-4.0, license in LICENSES/nerd-fonts)
 - Cleanup new logo
+- Fix cropped cat outline
+- *(gui)* Use ghost buttons for task actions and highlight destructive operations
+- *(gui)* Add padding right of scroll bar to separate it from resizing
+- *(gui)* Reduce vertical spacing between header and task list
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Update changelog for v0.2.6
+- *(release)* Update screenshots for v0.2.6
+- Release cfait version 0.2.6
+- Fix Cargo.toml (too many keywords)
+- Release cfait version 0.2.6
+- Lint
 ## [0.2.5] - 2025-12-04
 
 ### 🚀 Features
