@@ -288,9 +288,6 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
     .spacing(10)
     .align_y(iced::Alignment::Center);
 
-    // We no longer use individual MouseAreas here.
-    // Instead, we group elements into a row, and wrap the entire header later.
-
     let mut left_section = row![title_group]
         .spacing(10)
         .align_y(iced::Alignment::Center);
@@ -354,7 +351,12 @@ fn view_main_content(app: &GuiApp) -> Element<'_, Message> {
     // Assembly
     let header_row = row![left_section, middle_container, right_section]
         .spacing(10)
-        .padding(10)
+        .padding(iced::Padding {
+            top: 10.0,
+            bottom: 5.0, // <-- Adjusted from 2.0 to 5.0
+            left: 10.0,
+            right: 10.0,
+        })
         .align_y(iced::Alignment::Center);
 
     // Wrap the entire header in a MouseArea to enable dragging on any empty space (padding, spacers, text)
@@ -547,5 +549,12 @@ fn view_input_area(app: &GuiApp) -> Element<'_, Message> {
         column![input_title].spacing(5).into()
     };
 
-    container(inner_content).padding(10).into()
+    container(inner_content)
+        .padding(iced::Padding {
+            top: 5.0, // <-- Adjusted from 2.0 to 5.0
+            bottom: 10.0,
+            left: 10.0,
+            right: 10.0,
+        })
+        .into()
 }
