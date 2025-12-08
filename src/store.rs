@@ -31,12 +31,19 @@ impl TaskStore {
         Self::default()
     }
 
+    /// Bulk insert (e.g. from network load). Rebuilds index for these tasks.
     pub fn insert(&mut self, calendar_href: String, tasks: Vec<Task>) {
-        // Update Index
         for task in &tasks {
             self.index.insert(task.uid.clone(), calendar_href.clone());
         }
         self.calendars.insert(calendar_href, tasks);
+    }
+
+    /// Safe single insert that maintains the O(1) index.
+    pub fn add_task(&mut self, task: Task) {
+        let href = task.calendar_href.clone();
+        self.index.insert(task.uid.clone(), href.clone());
+        self.calendars.entry(href).or_default().push(task);
     }
 
     pub fn clear(&mut self) {
@@ -46,24 +53,22 @@ impl TaskStore {
 
     // --- Core Logic Helpers ---
 
-    /// Helper: Locate a task (mutable) by UID using the O(1) index.
     pub fn get_task_mut(&mut self, uid: &str) -> Option<(&mut Task, String)> {
-        // 1. Find Calendar HREF from Index
+        // 1. O(1) Lookup
         let href = self.index.get(uid)?.clone();
 
-        // 2. Retrieve Task from that Calendar
+        // 2. Retrieve
         if let Some(tasks) = self.calendars.get_mut(&href)
             && let Some(task) = tasks.iter_mut().find(|t| t.uid == uid)
         {
             return Some((task, href));
         }
 
-        // Index inconsistency (should not happen in normal flow, but safe to handle)
+        // If we get here, the index is stale (should not happen). Clean it up.
         self.index.remove(uid);
         None
     }
 
-    /// Toggles task status (Completed/NeedsAction).
     pub fn toggle_task(&mut self, uid: &str) -> Option<Task> {
         if let Some((task, _)) = self.get_task_mut(uid) {
             task.status = if task.status == TaskStatus::Completed {
@@ -119,10 +124,11 @@ impl TaskStore {
             && let Some(idx) = tasks.iter().position(|t| t.uid == uid)
         {
             let task = tasks.remove(idx);
-            // Clean Index
+
+            // Remove from Index
             self.index.remove(uid);
 
-            // Update Cache
+            // Sync to Cache
             let (_, token) = Cache::load(&href).unwrap_or((vec![], None));
             let _ = Cache::save(&href, tasks, token);
 
@@ -160,26 +166,28 @@ impl TaskStore {
     }
 
     pub fn move_task(&mut self, uid: &str, target_href: String) -> Option<Task> {
-        // Use internal delete to handle removal + index cleanup + cache save
+        // delete_task handles removal from calendar, index, and cache
         let task_opt = self.delete_task(uid);
 
         if let Some(mut task) = task_opt {
             if task.calendar_href == target_href {
-                // Was already here, re-insert
-                self.insert(target_href, vec![task]); // Insert handles index update
+                // Edge case: Move to same calendar. Re-add.
+                self.add_task(task);
                 return None;
             }
 
             task.calendar_href = target_href.clone();
 
-            // Insert into new (Updates Index automatically via insert helper logic if we used it, but let's be explicit)
-            let target_list = self.calendars.entry(target_href.clone()).or_default();
-            target_list.push(task.clone());
-            self.index.insert(task.uid.clone(), target_href.clone());
+            // Add to new calendar (Updates Index automatically via add_task)
+            // But we need to save cache manually since add_task doesn't save to disk by default
+            // (to allow batch inserts).
+            self.add_task(task.clone());
 
-            // Update Cache for target
-            let (_, token) = Cache::load(&target_href).unwrap_or((vec![], None));
-            let _ = Cache::save(&target_href, target_list, token);
+            // Update Cache for target calendar
+            if let Some(target_list) = self.calendars.get(&target_href) {
+                let (_, token) = Cache::load(&target_href).unwrap_or((vec![], None));
+                let _ = Cache::save(&target_href, target_list, token);
+            }
 
             return Some(task);
         }
@@ -363,7 +371,6 @@ impl TaskStore {
     }
 
     pub fn is_task_done(&self, uid: &str) -> Option<bool> {
-        // Optimization: Use index
         if let Some(href) = self.index.get(uid)
             && let Some(tasks) = self.calendars.get(href)
             && let Some(t) = tasks.iter().find(|t| t.uid == uid)

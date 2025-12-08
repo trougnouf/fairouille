@@ -46,7 +46,6 @@ pub async fn handle_key_event(
     match state.mode {
         InputMode::Creating => match key.code {
             KeyCode::Enter if !state.input_buffer.is_empty() => {
-                // Tag Jump Logic
                 if state.input_buffer.starts_with('#')
                     && !state.input_buffer.trim().contains(' ')
                     && state.creating_child_of.is_none()
@@ -77,12 +76,8 @@ pub async fn handle_key_event(
                     task.calendar_href = href.clone();
                     task.parent_uid = state.creating_child_of.clone();
 
-                    state
-                        .store
-                        .calendars
-                        .entry(href)
-                        .or_default()
-                        .push(task.clone());
+                    // Fix: Use add_task to maintain index
+                    state.store.add_task(task.clone());
                     state.refresh_filtered_view();
 
                     state.mode = InputMode::Normal;

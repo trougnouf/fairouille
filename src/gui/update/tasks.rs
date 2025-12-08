@@ -26,7 +26,6 @@ pub fn handle(app: &mut GuiApp, message: Message) -> Task<Message> {
         }
         Message::SubmitTask => handle_submit(app),
 
-        // --- REGRESSION FIX: Re-added EditTaskStart and CancelEdit ---
         Message::EditTaskStart(index) => {
             if let Some(task) = app.tasks.get(index) {
                 app.input_value = task.to_smart_string();
@@ -200,7 +199,6 @@ fn handle_submit(app: &mut GuiApp) -> Task<Message> {
         return Task::none();
     }
 
-    // Tag Jump
     if app.input_value.starts_with('#')
         && !app.input_value.trim().contains(' ')
         && app.editing_uid.is_none()
@@ -236,7 +234,6 @@ fn handle_submit(app: &mut GuiApp) -> Task<Message> {
             }
         }
     } else {
-        // Create Logic
         let mut new_task = TodoTask::new(&app.input_value, &app.tag_aliases);
         if let Some(parent) = &app.creating_child_of {
             new_task.parent_uid = Some(parent.clone());
@@ -251,16 +248,14 @@ fn handle_submit(app: &mut GuiApp) -> Task<Message> {
 
         if !target_href.is_empty() {
             new_task.calendar_href = target_href.clone();
-            app.store
-                .calendars
-                .entry(target_href)
-                .or_default()
-                .push(new_task.clone());
+
+            // Fix: Use add_task to maintain index
+            app.store.add_task(new_task.clone());
+
             app.selected_uid = Some(new_task.uid.clone());
             refresh_filtered_tasks(app);
             app.input_value.clear();
 
-            // Scroll logic
             let len = app.tasks.len().max(1) as f32;
             let idx = app
                 .tasks
