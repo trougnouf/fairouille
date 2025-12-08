@@ -457,7 +457,7 @@ pub fn view_task_row<'a>(
         title_row,
         // If we didn't place tags inline, show them on a separate right-aligned row
         if !place_inline && has_metadata {
-            row![Space::new(), build_tags()]
+            row![Space::new().width(Length::Fill), build_tags()]
         } else {
             row![]
         }
