@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.8] - 2025-12-08
+
+### 🚀 Features
+
+- *(ui)* Implement smart tag navigation, search result jumping, and implicit tag matching
+- *(sync)* Implement safe 3-way merge for 412 conflicts to reduce duplicate tasks
+- *(core)* Safe unmapped property handling
+- *(gui)* Implement optimistic cache loading for instant startup
+
+### 🐛 Bug Fixes
+
+- *(gui)* Reset child creation mode when unlinking/canceling the parent reference
+- *(tui)* Use default color for default text for white bg terminals compatibility
+- *(core)* Optimize unmapped property parsing and ensure backward compatibility
+
+### 📚 Documentation
+
+- *(readme)* Mentian Mint
+
+### 🎨 Styling
+
+- *(gui)* "select" active task
+
+### ⚙️ Miscellaneous Tasks
+
+- Lint
 ## [0.2.7] - 2025-12-06
 
 ### 🚀 Features
@@ -36,6 +62,7 @@
 - *(gui)* Use ghost buttons for task actions and highlight destructive operations
 - *(gui)* Add padding right of scroll bar to separate it from resizing
 - *(gui)* Reduce vertical spacing between header and task list
+- *(gui)* Reduce spacing between input bar and 1st task
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -45,6 +72,8 @@
 - Fix Cargo.toml (too many keywords)
 - Release cfait version 0.2.6
 - Lint
+- *(release)* Update readme and changelog for 0.2.7
+- Release cfait version 0.2.7
 ## [0.2.5] - 2025-12-04
 
 ### 🚀 Features
