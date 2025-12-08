@@ -62,20 +62,19 @@ pub fn handle(app: &mut GuiApp, message: Message) -> Task<Message> {
             }
 
             // 4. Set Active Calendar
-            if let Some(def) = &app.ob_default_cal {
-                if app
+            if let Some(def) = &app.ob_default_cal
+                && app
                     .calendars
                     .iter()
                     .any(|c| c.name == *def || c.href == *def)
-                {
-                    // Find the href if the user provided a name
-                    let href = app
-                        .calendars
-                        .iter()
-                        .find(|c| c.name == *def || c.href == *def)
-                        .map(|c| c.href.clone());
-                    app.active_cal_href = href;
-                }
+            {
+                // Find the href if the user provided a name
+                let href = app
+                    .calendars
+                    .iter()
+                    .find(|c| c.name == *def || c.href == *def)
+                    .map(|c| c.href.clone());
+                app.active_cal_href = href;
             }
             if app.active_cal_href.is_none() {
                 app.active_cal_href = Some(LOCAL_CALENDAR_HREF.to_string());
