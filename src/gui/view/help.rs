@@ -1,3 +1,4 @@
+// File: src/gui/view/help.rs
 use crate::gui::message::Message;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Color, Element, Length, Theme};
@@ -72,16 +73,24 @@ pub fn view_help() -> Element<'static, Message> {
 
         // FOOTER
         container(
-            button(
-                text("Close Help")
-                    .size(16)
-                    .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-            )
-            .padding(12)
-            .width(Length::Fixed(200.0))
-            .style(iced::widget::button::primary)
-            .on_press(Message::CloseHelp)
+            column![
+                button(
+                    text("Close Help")
+                        .size(16)
+                        .width(Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Center)
+                )
+                .padding(12)
+                .width(Length::Fixed(200.0))
+                .style(iced::widget::button::primary)
+                .on_press(Message::CloseHelp),
+                
+                text(format!("Cfait v{} \u{2022} GPL3 \u{2022} Trougnouf (Benoit Brummer)", env!("CARGO_PKG_VERSION")))
+                     .size(12)
+                     .style(|_: &Theme| text::Style { color: Some(COL_MUTED) })
+            ]
+            .spacing(15)
+            .align_x(iced::Alignment::Center)
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
@@ -149,7 +158,6 @@ fn help_card(title: &'static str, icon_char: char, items: Vec<HelpEntry>) -> Ele
                 text::<Theme, iced::Renderer>(item.desc).size(14).width(Length::Fill).style(|_: &Theme| text::Style { color: Some(Color::WHITE) }),
             ].spacing(10).align_y(iced::Alignment::Center),
             
-            // FIXED: Explicitly construct Element for both branches to ensure type matching
             if !item.example.is_empty() {
                 Element::new(row![
                     Space::new().width(Length::Fixed(110.0)),

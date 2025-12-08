@@ -10,11 +10,11 @@ It features both an efficient **TUI (Terminal UI)** and a modern **GUI (Graphica
 ![logo](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_icon_v2.svg)
 > The icon
 
-![Cfait GUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.2.7_screenshot_(GUI).png)
-> The Graphical Interface in v0.2.7 <small>([history](https://commons.wikimedia.org/wiki/Category:Screenshots_of_Cfait_(GUI)))</small>
+![Cfait GUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.2.9_screenshot_(GUI).png)
+> The Graphical Interface in v0.2.9 <small>([history](https://commons.wikimedia.org/wiki/Category:Screenshots_of_Cfait_(GUI)))</small>
 
-![Cfait TUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.2.6_screenshot_(TUI).png)
-> The Terminal Interface in v0.2.6 <small>([history](https://commons.wikimedia.org/wiki/Category:Screenshots_of_Cfait_(TUI)))</small>
+![Cfait TUI Screenshot](https://commons.wikimedia.org/wiki/Special:FilePath/Cfait_task_manager_v0.2.9_screenshot_(TUI).png)
+> The Terminal Interface in v0.2.9 <small>([history](https://commons.wikimedia.org/wiki/Category:Screenshots_of_Cfait_(TUI)))</small>
 
 
 ## Features

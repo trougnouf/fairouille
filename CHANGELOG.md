@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.9] - 2025-12-08
+
+### 🚀 Features
+
+- *(sync)* Preserve recurring task exceptions written by other clients
+- *(gui)* Click on tag jumps to it
+- *(gui)* Help on hover
+
+### ⚡ Performance
+
+- *(sync)* Optimize VTODO parsing and exception preservation to speedup startup from empty cache
+
+### 🎨 Styling
+
+- *(gui)* Always align tags to the right and try to share a line with the title
+- *(gui)* Switch calendar highlight from blue to amber
+- *(gui)* (deterministically) randomize tag color
+- *(gui)* Switch Calendars/Tags header from blue to amber
+- *(gui)* Move logo/icon to the sidebar when space permits
+
+### ⚙️ Miscellaneous Tasks
+
+- Switch to iced 0.14.0 (dev->release)
+- *(forgejo)* Build once for different Linux releases
 ## [0.2.8] - 2025-12-08
 
 ### 🚀 Features
@@ -26,6 +50,9 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Lint
+- Update CHANGELOG
+- Lint
+- Release cfait version 0.2.8
 ## [0.2.7] - 2025-12-06
 
 ### 🚀 Features
