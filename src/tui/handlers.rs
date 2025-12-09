@@ -1,6 +1,6 @@
 // File: src/tui/handlers.rs
 use crate::config::Config;
-use crate::model::{CalendarListEntry, Task, TaskStatus, extract_inline_aliases};
+use crate::model::{Task, TaskStatus, extract_inline_aliases};
 use crate::storage::LOCAL_CALENDAR_HREF;
 use crate::tui::action::{Action, AppEvent, SidebarMode};
 use crate::tui::state::{AppState, Focus, InputMode};
@@ -304,6 +304,7 @@ pub async fn handle_key_event(
                     } else if let Some(updated) =
                         state.store.set_parent(&child_uid, Some(parent_uid))
                     {
+                        state.yanked_uid = None; // Auto-unlink after action
                         state.refresh_filtered_view();
                         return Some(Action::UpdateTask(updated));
                     }
@@ -352,6 +353,7 @@ pub async fn handle_key_event(
                         state.message = "Cannot depend on self!".to_string();
                     } else if let Some(updated) = state.store.add_dependency(&curr_uid, yanked_uid)
                     {
+                        state.yanked_uid = None; // Auto-unlink after action
                         state.refresh_filtered_view();
                         return Some(Action::UpdateTask(updated));
                     }

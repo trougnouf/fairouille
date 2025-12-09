@@ -125,12 +125,11 @@ pub fn view_task_row<'a>(
             if show_indent && let Some(p_uid) = &task.parent_uid {
                 let mut p_cats = HashSet::new();
                 // Read-only store lookup to avoid clone
-                if let Some(href) = app.store.index.get(p_uid) {
-                    if let Some(list) = app.store.calendars.get(href) {
-                        if let Some(p) = list.iter().find(|t| t.uid == *p_uid) {
-                            p_cats = p.categories.iter().cloned().collect();
-                        }
-                    }
+                if let Some(href) = app.store.index.get(p_uid)
+                    && let Some(list) = app.store.calendars.get(href)
+                    && let Some(p) = list.iter().find(|t| t.uid == *p_uid)
+                {
+                    p_cats = p.categories.iter().cloned().collect();
                 }
                 p_cats
             } else {
