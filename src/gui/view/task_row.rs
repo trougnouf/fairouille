@@ -121,30 +121,21 @@ pub fn view_task_row<'a>(
         }
 
         // Parent Tag Filtering Logic
-        let parent_categories: HashSet<String> = if show_indent
-            && let Some(p_uid) = &task.parent_uid
-            && let Some((parent, _)) = app.store.clone().get_task_mut(p_uid)
-        // Cloning store is cheap (RefCell/Arc usually, but here HashMap clone might be heavy. Optimized: use direct lookup if possible, but store is not available as ref here easily without clone or passed ref. Actually `app` is passed ref. We can iterate `app.tasks` which is already sorted/filtered.)
-        {
-            // Getting parent from `app.tasks` is better if visible, but `organize_hierarchy` implies parent might be in list.
-            // However, `app.tasks` is the view list. If parent is collapsed/hidden, it might not be there.
-            // Using app.store directly is safer for data correctness.
-            // Note: `get_task_mut` requires mutable reference which we don't have on `app`.
-            // We need a read-only way. `app.store.calendars`...
-
-            // Re-implement read-only lookup since `get_task_mut` is the only public accessor helper currently.
-            let mut p_cats = HashSet::new();
-            if let Some(href) = app.store.index.get(p_uid) {
-                if let Some(list) = app.store.calendars.get(href) {
-                    if let Some(p) = list.iter().find(|t| t.uid == *p_uid) {
-                        p_cats = p.categories.iter().cloned().collect();
+        let parent_categories: HashSet<String> =
+            if show_indent && let Some(p_uid) = &task.parent_uid {
+                let mut p_cats = HashSet::new();
+                // Read-only store lookup to avoid clone
+                if let Some(href) = app.store.index.get(p_uid) {
+                    if let Some(list) = app.store.calendars.get(href) {
+                        if let Some(p) = list.iter().find(|t| t.uid == *p_uid) {
+                            p_cats = p.categories.iter().cloned().collect();
+                        }
                     }
                 }
-            }
-            p_cats
-        } else {
-            HashSet::new()
-        };
+                p_cats
+            } else {
+                HashSet::new()
+            };
 
         for cat in &task.categories {
             // Hide if parent has same tag and we are showing hierarchy
@@ -312,6 +303,23 @@ pub fn view_task_row<'a>(
                 .style(tooltip_style)
                 .delay(Duration::from_millis(700)),
             );
+
+            // ELEVATOR UP (Moved here as requested)
+            if task.parent_uid.is_some() {
+                let lift_btn = button(icon::icon(icon::ELEVATOR_UP).size(14))
+                    .style(action_style)
+                    .padding(4)
+                    .on_press(Message::RemoveParent(task.uid.clone()));
+                actions = actions.push(
+                    tooltip(
+                        lift_btn,
+                        text("Promote (remove parent)").size(12),
+                        tooltip::Position::Top,
+                    )
+                    .style(tooltip_style)
+                    .delay(Duration::from_millis(700)),
+                );
+            }
         }
     } else {
         let link_btn = button(icon::icon(icon::LINK).size(14))

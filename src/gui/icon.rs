@@ -43,6 +43,7 @@ pub const BLOCKED: char = '\u{f479}'; // nf-oct-blocked
 pub const CHILD: char = '\u{f0a89}'; // nf-md-account_child
 pub const CREATE_CHILD: char = '\u{f0014}'; // nf-md-account_plus
 pub const CLEAR_ALL: char = '\u{eabf}'; // nf-cod-clear_all
+pub const ELEVATOR_UP: char = '\u{f12c1}'; // nf-md-elevator_up
 
 // New Icons
 pub const SETTINGS_GEAR: char = '\u{e690}'; // nf-seti-settings
