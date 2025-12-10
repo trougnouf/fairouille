@@ -70,17 +70,15 @@ impl LocalStorage {
     }
 
     pub fn load() -> Result<Vec<Task>> {
-        if let Some(path) = Self::get_path()
-            && path.exists()
-        {
+        if let Some(path) = Self::get_path() {
+            if !path.exists() {
+                return Ok(vec![]);
+            }
             return Self::with_lock(&path, || {
-                if let Ok(json) = fs::read_to_string(&path)
-                    && let Ok(tasks) = serde_json::from_str::<Vec<Task>>(&json)
-                {
-                    Ok(tasks)
-                } else {
-                    Ok(vec![])
-                }
+                let json = fs::read_to_string(&path)?;
+                // CHANGE: Propagate error instead of checking `if let Ok`
+                let tasks = serde_json::from_str::<Vec<Task>>(&json)?;
+                Ok(tasks)
             });
         }
         Ok(vec![])

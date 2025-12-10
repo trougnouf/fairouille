@@ -373,7 +373,8 @@ impl RustyClient {
 
     pub async fn create_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            let mut all = LocalStorage::load().unwrap_or_default();
+            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
             all.push(task.clone());
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
             return Ok(vec![]);
@@ -394,7 +395,8 @@ impl RustyClient {
 
     pub async fn update_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            let mut all = LocalStorage::load().unwrap_or_default();
+            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
             if let Some(idx) = all.iter().position(|t| t.uid == task.uid) {
                 all[idx] = task.clone();
                 LocalStorage::save(&all).map_err(|e| e.to_string())?;
@@ -408,7 +410,8 @@ impl RustyClient {
 
     pub async fn delete_task(&self, task: &Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            let mut all = LocalStorage::load().unwrap_or_default();
+            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
             all.retain(|t| t.uid != task.uid);
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
             return Ok(vec![]);
@@ -432,7 +435,8 @@ impl RustyClient {
         };
 
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            let mut all = LocalStorage::load().unwrap_or_default();
+            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
             if let Some(idx) = all.iter().position(|t| t.uid == task.uid) {
                 all[idx] = task.clone();
             }
