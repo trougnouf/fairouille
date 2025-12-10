@@ -1,4 +1,5 @@
 // File: src/gui/view/task_row.rs
+
 use crate::color_utils;
 use crate::gui::icon;
 use crate::gui::message::Message;
@@ -138,27 +139,45 @@ pub fn view_task_row<'a>(
             );
         }
 
-        // Parent Tag Filtering Logic
-        let parent_categories: HashSet<String> =
-            if show_indent && let Some(p_uid) = &task.parent_uid {
-                let mut p_cats = HashSet::new();
-                // Read-only store lookup to avoid clone
-                if let Some(href) = app.store.index.get(p_uid)
-                    && let Some(list) = app.store.calendars.get(href)
-                    && let Some(p) = list.iter().find(|t| t.uid == *p_uid)
-                {
-                    p_cats = p.categories.iter().cloned().collect();
+        // --- FIXED: Consolidated hiding logic ---
+        // 1. Calculate tags to hide because they are inherited from the parent task.
+        let mut tags_to_hide: HashSet<String> = if show_indent && let Some(p_uid) = &task.parent_uid
+        {
+            let mut p_cats = HashSet::new();
+            if let Some(href) = app.store.index.get(p_uid)
+                && let Some(list) = app.store.calendars.get(href)
+                && let Some(p) = list.iter().find(|t| t.uid == *p_uid)
+            {
+                p_cats = p.categories.iter().cloned().collect();
+            }
+            p_cats
+        } else {
+            HashSet::new()
+        };
+
+        // 2. Add tags to hide because they are implied by an alias.
+        for cat in &task.categories {
+            let mut search = cat.as_str();
+            loop {
+                if let Some(targets) = app.tag_aliases.get(search) {
+                    for t in targets {
+                        tags_to_hide.insert(t.clone());
+                    }
                 }
-                p_cats
-            } else {
-                HashSet::new()
-            };
+                if let Some(idx) = search.rfind(':') {
+                    search = &search[..idx];
+                } else {
+                    break;
+                }
+            }
+        }
 
         for cat in &task.categories {
-            // Hide if parent has same tag and we are showing hierarchy
-            if show_indent && parent_categories.contains(cat) {
+            // Hide if parent has same tag OR if it is an expanded alias
+            if tags_to_hide.contains(cat) {
                 continue;
             }
+            // --- END FIX ---
 
             let (r, g, b) = color_utils::generate_color(cat);
             let bg_color = Color::from_rgb(r, g, b);

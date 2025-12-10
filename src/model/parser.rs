@@ -47,14 +47,25 @@ impl Task {
                     if !self.categories.contains(&cat) {
                         self.categories.push(cat.clone());
                     }
-                    // Apply aliases
-                    if let Some(expanded_tags) = aliases.get(&cat) {
-                        for extra_tag in expanded_tags {
-                            if !self.categories.contains(extra_tag) {
-                                self.categories.push(extra_tag.clone());
+
+                    // Apply aliases recursively (e.g. #a:b -> check alias for #a:b, then #a)
+                    let mut search = cat.as_str();
+                    loop {
+                        if let Some(expanded_tags) = aliases.get(search) {
+                            for extra_tag in expanded_tags {
+                                if !self.categories.contains(extra_tag) {
+                                    self.categories.push(extra_tag.clone());
+                                }
                             }
                         }
+                        // Move up hierarchy
+                        if let Some(idx) = search.rfind(':') {
+                            search = &search[..idx];
+                        } else {
+                            break;
+                        }
                     }
+
                     i += 1;
                     continue;
                 }

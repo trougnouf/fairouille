@@ -194,6 +194,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     f.render_stateful_widget(sidebar, h_chunks[0], &mut state.cal_state);
 
     // --- Task List ---
+    // --- Task List ---
     let list_inner_width = main_chunks[0].width.saturating_sub(2) as usize;
 
     let task_items: Vec<ListItem> = state
@@ -243,8 +244,32 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             };
             let recur_str = if t.rrule.is_some() { " (R)" } else { "" };
 
-            // Layout Calculation
-            let tags_str_len: usize = t.categories.iter().map(|c| c.len() + 2).sum();
+            // --- NEW: Calculate tags to hide based on aliases ---
+            let mut hidden_tags = std::collections::HashSet::new();
+            for cat in &t.categories {
+                let mut search = cat.as_str();
+                loop {
+                    if let Some(targets) = state.tag_aliases.get(search) {
+                        for target in targets {
+                            hidden_tags.insert(target.clone());
+                        }
+                    }
+                    if let Some(idx) = search.rfind(':') {
+                        search = &search[..idx];
+                    } else {
+                        break;
+                    }
+                }
+            }
+            let visible_cats: Vec<&String> = t
+                .categories
+                .iter()
+                .filter(|c| !hidden_tags.contains(*c))
+                .collect();
+            // --- END NEW ---
+
+            // Layout Calculation (uses visible_cats now)
+            let tags_str_len: usize = visible_cats.iter().map(|c| c.len() + 2).sum();
 
             let left_text = format!(
                 "{}{}{} {}{}{}{}",
@@ -262,7 +287,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
             let mut spans = vec![Span::styled(left_text, base_style), Span::raw(padding)];
 
-            for cat in &t.categories {
+            // Use visible_cats for rendering
+            for cat in visible_cats {
                 let (r, g, b) = color_utils::generate_color(cat);
                 let color = Color::Rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8);
                 spans.push(Span::styled(
