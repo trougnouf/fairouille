@@ -35,7 +35,29 @@ pub struct Config {
     pub tag_aliases: HashMap<String, Vec<String>>,
 }
 
+// --- ADDED THIS IMPLEMENTATION ---
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            default_calendar: None,
+            allow_insecure_certs: false,
+            hidden_calendars: Vec::new(),
+            disabled_calendars: Vec::new(),
+            hide_completed: false,
+            // Match the serde defaults
+            hide_fully_completed_tags: true,
+            sort_cutoff_months: Some(6),
+            tag_aliases: HashMap::new(),
+        }
+    }
+}
+// --------------------------------
+
 impl Config {
+    // ... keep existing implementation ...
     pub fn load() -> Result<Self> {
         let path = AppPaths::get_config_file_path()?;
         if path.exists() {

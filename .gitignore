@@ -1,4 +1,22 @@
+# Rust
 target/
 *.log
 Cargo.lock
 
+# Android - Build Artifacts
+android/app/build/
+android/build/
+.gradle/
+android/.gradle/
+
+# Android - Local Configuration
+local.properties
+
+# Android - Native Libs (Built by cargo-ndk)
+android/app/src/main/jniLibs/
+
+# IDE
+.idea/
+*.iml
+*.hprof
+.DS_Store

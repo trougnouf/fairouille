@@ -247,3 +247,37 @@ Commits are pushed to the following repositories. The automated build pipelines 
     *   **Environment:** builds run on **Ubuntu 24.04** and **Windows Server**.
     *   **Artifacts:** native Debian/Ubuntu package, native Windows build, PKGBUILD.
 *   **[GitLab](https://gitlab.com/trougnouf/cfait)**
+
+## Android Development
+
+Cfait uses a native Android UI (Jetpack Compose) backed by the shared Rust core via [UniFFI](https://github.com/mozilla/uniffi-rs).
+
+### Prerequisites
+1.  **Android Studio** (with NDK installed).
+2.  **Rust Targets**:
+    ```bash
+    rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+    ```
+3.  **Tools**:
+    ```bash
+    cargo install cargo-ndk
+    ```
+
+### Building & Running
+1.  **Compile the Rust Library:**
+    Note: You must set `ANDROID_NDK_HOME` to your NDK installation path (e.g., inside `~/Android/Sdk/ndk/...` or `/opt/android-ndk`).
+    ```bash
+    export ANDROID_NDK_HOME=/path/to/your/ndk
+    cargo ndk -t aarch64-linux-android -t x86_64-linux-android -o ./android/app/src/main/jniLibs build --release --lib
+    ```
+
+2.  **Generate Kotlin Bindings:**
+    ```bash
+    cargo run --bin uniffi-bindgen generate \
+      --library target/aarch64-linux-android/release/libcfait.so \
+      --language kotlin \
+      --out-dir ./android/app/src/main/java \
+      --config uniffi.toml
+    ```
+
+3.  **Run:** Open the `android` folder in Android Studio and click **Run**.

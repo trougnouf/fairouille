@@ -2,9 +2,11 @@
 use crate::model::Task;
 use crate::paths::AppPaths;
 use anyhow::Result;
-use fs2::FileExt;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[cfg(not(target_os = "android"))]
+use fs2::FileExt;
 
 // Constants for identification
 pub const LOCAL_CALENDAR_HREF: &str = "local://default";
@@ -18,6 +20,7 @@ impl LocalStorage {
     }
 
     /// Helper to get a sidecar lock file path (e.g., "local.json.lock")
+    #[cfg(not(target_os = "android"))]
     fn get_lock_path(file_path: &Path) -> PathBuf {
         let mut lock_path = file_path.to_path_buf();
         if let Some(ext) = lock_path.extension() {
@@ -35,18 +38,28 @@ impl LocalStorage {
     where
         F: FnOnce() -> Result<T>,
     {
-        let lock_path = Self::get_lock_path(file_path);
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)?;
+        #[cfg(target_os = "android")]
+        {
+            // Silence the warning explicitly for Android
+            let _ = file_path;
+            f()
+        }
 
-        file.lock_exclusive()?;
-        let result = f();
-        file.unlock()?;
-        result
+        #[cfg(not(target_os = "android"))]
+        {
+            let lock_path = Self::get_lock_path(file_path); // Now this works
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&lock_path)?;
+
+            file.lock_exclusive()?;
+            let result = f();
+            file.unlock()?;
+            result
+        }
     }
 
     /// Atomic write: Write to .tmp file then rename

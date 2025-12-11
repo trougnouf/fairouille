@@ -4,10 +4,19 @@ use directories::ProjectDirs;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+// Allow injecting a base path (from Android Context)
+static ANDROID_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct AppPaths;
 
 impl AppPaths {
+    /// Initialize the Android data directory. Must be called once at startup.
+    pub fn init_android_path(path: String) {
+        let _ = ANDROID_DATA_DIR.set(PathBuf::from(path));
+    }
+
     /// Returns the ProjectDirs struct, common to all path lookups.
     fn get_proj_dirs() -> Option<ProjectDirs> {
         ProjectDirs::from("com", "cfait", "cfait")
@@ -24,19 +33,19 @@ impl AppPaths {
     }
 
     /// Determines the logic for the base directory based on environment variables or OS defaults.
-    /// Returns (PathBuf, is_test_mode).
     fn resolve_base(subdir: &str) -> Option<PathBuf> {
-        // 1. Test Override
-        if let Ok(test_dir) = env::var("CFAIT_TEST_DIR") {
-            let path = PathBuf::from(test_dir);
-            // In test mode, we often dump everything in the root or a specific struct
-            // For simplicity in testing, we usually just return the root test dir
-            // unless specific subfolder structure is required by tests.
-            // Existing tests imply flat structure in temp dir.
-            return Some(path);
+        // 1. Android Override
+        if let Some(android_root) = ANDROID_DATA_DIR.get() {
+            // On Android, everything goes into the app's private files directory.
+            return Some(android_root.join(subdir));
         }
 
-        // 2. Standard OS location
+        // 2. Test Override
+        if let Ok(test_dir) = env::var("CFAIT_TEST_DIR") {
+            return Some(PathBuf::from(test_dir));
+        }
+
+        // 3. Standard OS location
         let proj = Self::get_proj_dirs()?;
 
         let dir = match subdir {
@@ -72,8 +81,6 @@ impl AppPaths {
     }
 
     pub fn get_journal_path() -> Option<PathBuf> {
-        // Journal is optional/recoverable, so we return Option to match existing API signature
-        // though logically it should probably return Result.
         Self::get_data_dir().ok().map(|p| p.join("journal.json"))
     }
 

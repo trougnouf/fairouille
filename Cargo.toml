@@ -23,6 +23,10 @@ exclude = [
     "RUST_DEPENDENCIES.html",
 ]
 
+[lib]
+crate-type = ["lib", "cdylib"]
+name = "cfait"
+
 [dependencies]
 # --- COMMON (Core Logic) ---
 chrono = { version = "0.4", features = ["serde"] }
@@ -45,6 +49,11 @@ rustls-native-certs = "0.8"
 futures = "0.3"
 fs2 = "0.4"
 
+# --- ANDROID / INTEROP ---
+uniffi = { version = "0.30", features = ["tokio", "build", "cli"] }
+uniffi_bindgen = "0.30" 
+
+
 # --- TUI ONLY (Optional) ---
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.29", optional = true }
@@ -52,10 +61,17 @@ crossterm = { version = "0.29", optional = true }
 # --- GUI ONLY (Future) ---
 iced = { version = "0.14.0", features = ["tokio", "svg", "advanced"], optional = true }
 
+# --- ANDROID SPECIFIC ---
+[target.'cfg(target_os = "android")'.dependencies]
+rustls-platform-verifier = "0.6"
+android_logger = "0.15"
+log = "0.4"
+
 [dev-dependencies]
 mockito = "1.7" # For mocking the HTTP server
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.18", features = ["v4"] }
+# Required to run the bindgen binary
 
 [features]
 default = ["tui"]
@@ -72,8 +88,13 @@ name = "gui"
 path = "src/bin/gui.rs"
 required-features = ["gui"]
 
+# New binary for generating bindings
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
 [profile.release]
-strip = true        # Automatically strip symbols from the binary.
+strip = false        # Automatically strip symbols from the binary.
 lto = true          # Link Time Optimization (removes dead code across crates).
 codegen-units = 1   # Slower compile, but smaller binary.
 
@@ -88,11 +109,8 @@ depends = "$auto"
 section = "utils"
 priority = "optional"
 assets = [
-    # Binary 1: TUI
     ["target/release/cfait", "usr/bin/", "755"],
-    # Binary 2: GUI (Note: the bin name is 'gui' in cargo, we rename it to cfait-gui)
     ["target/release/gui", "usr/bin/cfait-gui", "755"],
-    # Desktop File
     ["assets/cfait.desktop", "usr/share/applications/", "644"],
     ["assets/cfait.svg", "usr/share/icons/hicolor/scalable/apps/cfait.svg", "644"],
 ]

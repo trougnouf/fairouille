@@ -18,11 +18,16 @@ use http::{Request, StatusCode, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use rustls_native_certs;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tower_http::auth::AddAuthorization;
 use uuid::Uuid;
+
+#[cfg(not(target_os = "android"))]
+use rustls_native_certs;
+
+#[cfg(target_os = "android")]
+use rustls_platform_verifier::BuilderVerifierExt;
 
 pub const GET_CTAG: PropertyName = PropertyName::new("http://calendarserver.org/ns/", "getctag");
 pub const APPLE_COLOR: PropertyName =
@@ -61,32 +66,41 @@ impl RustyClient {
             .parse()
             .map_err(|e: http::uri::InvalidUri| e.to_string())?;
 
-        let https_connector = if insecure {
-            let tls_config = rustls::ClientConfig::builder()
+        let tls_config_builder = rustls::ClientConfig::builder();
+
+        let tls_config = if insecure {
+            tls_config_builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(NoVerifier))
-                .with_no_client_auth();
-            HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_or_http()
-                .enable_http1()
-                .build()
+                .with_no_client_auth()
         } else {
-            let mut root_store = rustls::RootCertStore::empty();
-            let result = rustls_native_certs::load_native_certs();
-            root_store.add_parsable_certificates(result.certs);
-            if root_store.is_empty() {
-                return Err("No valid system certificates found.".to_string());
+            #[cfg(not(target_os = "android"))]
+            {
+                let mut root_store = rustls::RootCertStore::empty();
+                let result = rustls_native_certs::load_native_certs();
+                root_store.add_parsable_certificates(result.certs);
+                if root_store.is_empty() {
+                    return Err("No valid system certificates found.".to_string());
+                }
+                tls_config_builder
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth()
             }
-            let tls_config = rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
-            HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_or_http()
-                .enable_http1()
-                .build()
+
+            #[cfg(target_os = "android")]
+            {
+                tls_config_builder
+                    .with_platform_verifier()
+                    .map_err(|e| format!("Failed to init platform verifier: {}", e))? // Handle the Result
+                    .with_no_client_auth()
+            }
         };
+
+        let https_connector = HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1()
+            .build();
 
         let http_client = Client::builder(TokioExecutor::new()).build(https_connector);
         let auth_client = AddAuthorization::basic(http_client.clone(), user, pass);
@@ -382,8 +396,7 @@ impl RustyClient {
 
     pub async fn create_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
-            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?;
             all.push(task.clone());
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
             return Ok(vec![]);
@@ -404,8 +417,7 @@ impl RustyClient {
 
     pub async fn update_task(&self, task: &mut Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
-            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?;
             if let Some(idx) = all.iter().position(|t| t.uid == task.uid) {
                 all[idx] = task.clone();
                 LocalStorage::save(&all).map_err(|e| e.to_string())?;
@@ -419,8 +431,7 @@ impl RustyClient {
 
     pub async fn delete_task(&self, task: &Task) -> Result<Vec<String>, String> {
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
-            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?;
             all.retain(|t| t.uid != task.uid);
             LocalStorage::save(&all).map_err(|e| e.to_string())?;
             return Ok(vec![]);
@@ -434,9 +445,6 @@ impl RustyClient {
         &self,
         task: &mut Task,
     ) -> Result<(Task, Option<Task>, Vec<String>), String> {
-        // --- FIX: Removed logic that flips status ---
-        // The UI/Store has already flipped the status. We just check if it IS completed now.
-
         let next_task = if task.status == TaskStatus::Completed {
             task.respawn()
         } else {
@@ -444,8 +452,7 @@ impl RustyClient {
         };
 
         if task.calendar_href == LOCAL_CALENDAR_HREF {
-            // WAS: let mut all = LocalStorage::load().unwrap_or_default();
-            let mut all = LocalStorage::load().map_err(|e| e.to_string())?; // FIX
+            let mut all = LocalStorage::load().map_err(|e| e.to_string())?;
             if let Some(idx) = all.iter().position(|t| t.uid == task.uid) {
                 all[idx] = task.clone();
             }
