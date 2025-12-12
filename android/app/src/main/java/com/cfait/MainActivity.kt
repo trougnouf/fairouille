@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -20,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -49,20 +52,21 @@ object NfIcons {
     val DELETE = get(0xf1f8)
     val CHECK = get(0xf00c)
     val CROSS = get(0xf00d)
-    val PLAY = get(0xf04b)
+    val PLAY = get(0xf04b) // fa-play
+    val PLAY_FA = get(0xf04b)
     val PAUSE = get(0xf04c)
     val REPEAT = get(0xf0b6)
-    val VISIBLE = get(0xea70)
-    val HIDDEN = get(0xeae7)
+    val VISIBLE = get(0xea70) // cod-eye
+    val HIDDEN = get(0xeae7) // cod-eye-closed
     val WRITE_TARGET = get(0xf0cfb)
     val MENU = get(0xf0c9)
     val ADD = get(0xf067)
     val BACK = get(0xf060)
     val BLOCK = get(0xf479)
-    val DOTS = get(0xf0d0) // fa-ellipsis-h
+    val DOTS_CIRCLE = get(0xf1978) 
     val PRIORITY_UP = get(0xf0603)
     val PRIORITY_DOWN = get(0xf0604)
-    val COPY = get(0xf0c5) // fa-copy
+    val COPY = get(0xf0c5) 
     val EDIT = get(0xf040)
 }
 
@@ -89,18 +93,15 @@ fun CfaitNavHost(api: CfaitMobile) {
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    // Instant load from cache, then sync in background
     fun fastStart() {
-        api.loadFromCache() // synchronous rust call
+        api.loadFromCache()
         calendars = api.getCalendars()
         scope.launch { tags = api.getAllTags() }
         defaultCalHref = api.getConfig().defaultCalendar
-        
         scope.launch {
             isLoading = true
             try { 
                 api.sync()
-                // Refresh data after sync
                 calendars = api.getCalendars()
                 tags = api.getAllTags()
             } catch (e: Exception) { statusMessage = e.message }
@@ -108,7 +109,6 @@ fun CfaitNavHost(api: CfaitMobile) {
         }
     }
 
-    // Refresh only the lists (post-action)
     fun refreshLists() {
         scope.launch {
             try {
@@ -176,21 +176,23 @@ fun HomeScreen(
     var newTaskText by remember { mutableStateOf("") }
     
     val clipboardManager = LocalClipboardManager.current
+    val isDark = isSystemInDarkTheme()
 
-    // Handle Back Press to close drawer
+    // Map for looking up colors efficiently
+    val calColorMap = remember(calendars) { 
+        calendars.associate { it.href to (it.color?.let { hex -> parseHexColor(hex) } ?: Color.Gray) }
+    }
+
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
 
     fun updateTaskList() {
-        scope.launch {
-            try { tasks = api.getViewTasks(filterTag, searchQuery) } catch (_: Exception) { }
-        }
+        scope.launch { try { tasks = api.getViewTasks(filterTag, searchQuery) } catch (_: Exception) { } }
     }
 
     LaunchedEffect(searchQuery, filterTag, isLoading) { updateTaskList() }
 
-    // --- TASK ACTIONS ---
     fun toggleTask(uid: String) = scope.launch { try { api.toggleTask(uid); updateTaskList(); onDataChanged() } catch (_: Exception){} }
     fun addTask(txt: String) = scope.launch { try { api.addTaskSmart(txt); updateTaskList(); onDataChanged() } catch (_: Exception){} }
     
@@ -223,12 +225,14 @@ fun HomeScreen(
                     LazyColumn {
                         if (sidebarTab == 0) {
                             items(calendars) { cal ->
+                                val calColor = cal.color?.let { parseHexColor(it) } ?: Color.Gray
                                 Row(
                                     modifier = Modifier.fillMaxWidth().clickable { api.setDefaultCalendar(cal.href); onDataChanged() }.padding(16.dp, 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Eye icon takes the calendar color if visible
                                     IconButton(onClick = { api.setCalendarVisibility(cal.href, !cal.isVisible); onDataChanged(); updateTaskList() }, modifier = Modifier.size(24.dp)) {
-                                        NfIcon(if (cal.isVisible) NfIcons.VISIBLE else NfIcons.HIDDEN)
+                                        NfIcon(if (cal.isVisible) NfIcons.VISIBLE else NfIcons.HIDDEN, color = if (cal.isVisible) calColor else Color.Gray)
                                     }
                                     Spacer(Modifier.width(12.dp))
                                     Text(cal.name, fontWeight = if (cal.href == defaultCalHref) FontWeight.Bold else FontWeight.Normal, color = if (cal.href == defaultCalHref) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
@@ -289,7 +293,8 @@ fun HomeScreen(
         ) { padding ->
             LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                 items(tasks, key = { it.uid }) { task ->
-                    TaskRow(task, { toggleTask(task.uid) }, { act -> onTaskAction(act, task) }, onTaskClick)
+                    val calColor = calColorMap[task.calendarHref] ?: Color.Gray
+                    TaskRow(task, calColor, isDark, { toggleTask(task.uid) }, { act -> onTaskAction(act, task) }, onTaskClick)
                 }
             }
         }
@@ -298,48 +303,48 @@ fun HomeScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TaskRow(task: MobileTask, onToggle: () -> Unit, onAction: (String) -> Unit, onClick: (String) -> Unit) {
-    val prioColor = getPriorityColor(task.priority.toInt())
-    val startPadding = (task.depth.toInt() * 16).dp
+fun TaskRow(task: MobileTask, calColor: Color, isDark: Boolean, onToggle: () -> Unit, onAction: (String) -> Unit, onClick: (String) -> Unit) {
+    val startPadding = (task.depth.toInt() * 12).dp 
     var expanded by remember { mutableStateOf(false) }
+    
+    // Determine Text Color based on Priority
+    val textColor = getTaskTextColor(task.priority.toInt(), task.isDone, isDark)
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp + startPadding, end = 16.dp, top = 4.dp, bottom = 4.dp).clickable { onClick(task.uid) },
-        border = BorderStroke(1.dp, if (task.isDone) Color.Gray else prioColor),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp + startPadding, end = 12.dp, top = 2.dp, bottom = 2.dp).clickable { onClick(task.uid) },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = task.isDone, onCheckedChange = { onToggle() })
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             
-            Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            TaskCheckbox(task, calColor, onToggle)
+            
+            Spacer(Modifier.width(8.dp))
+
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = task.summary, style = MaterialTheme.typography.bodyLarge,
-                    color = if (task.isDone) Color.Gray else MaterialTheme.colorScheme.onSurface,
-                    textDecoration = if (task.isDone) TextDecoration.LineThrough else null
+                    text = task.summary, 
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textColor,
+                    fontWeight = if(task.priority > 0.toUByte()) FontWeight.Medium else FontWeight.Normal,
+                    textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
+                    lineHeight = 18.sp
                 )
                 
-                // Using FlowRow to fix the tag layout issue
-                FlowRow(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (task.isBlocked) NfIcon(NfIcons.BLOCK, 12.sp, MaterialTheme.colorScheme.error)
-                    if (task.priority.toInt() > 0) Text("!${task.priority}", color = prioColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    if (!task.dueDateIso.isNullOrEmpty()) { NfIcon(NfIcons.CALENDAR, 12.sp, Color.Gray); Text(task.dueDateIso!!.take(10), fontSize = 12.sp, color = Color.Gray) }
-                    if (task.isRecurring) NfIcon(NfIcons.REPEAT, 12.sp, Color.Gray)
+                FlowRow(modifier = Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (task.isBlocked) NfIcon(NfIcons.BLOCK, 10.sp, MaterialTheme.colorScheme.error)
+                    // We don't need to show !1 tag if the text is already colored, but keeping it small is fine
+                    if (!task.dueDateIso.isNullOrEmpty()) { NfIcon(NfIcons.CALENDAR, 10.sp, Color.Gray); Text(task.dueDateIso!!.take(10), fontSize = 10.sp, color = Color.Gray) }
+                    if (task.isRecurring) NfIcon(NfIcons.REPEAT, 10.sp, Color.Gray)
                     
-                    // Status Icons
-                    if (task.statusString == "InProcess") NfIcon(NfIcons.PLAY, 12.sp, Color(0xFF4CAF50))
-                    if (task.statusString == "Cancelled") NfIcon(NfIcons.CROSS, 12.sp, Color(0xFFD32F2F))
-
                     task.categories.forEach { tag ->
-                        Surface(color = getTagColor(tag).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                            Text("#$tag", fontSize = 10.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                        }
+                        Text("#$tag", fontSize = 10.sp, color = getTagColor(tag), modifier = Modifier.padding(end = 2.dp))
                     }
                 }
             }
             
-            // ACTION MENU
             Box {
-                IconButton(onClick = { expanded = true }) { NfIcon(NfIcons.DOTS, 16.sp) }
+                IconButton(onClick = { expanded = true }, modifier = Modifier.size(24.dp)) { NfIcon(NfIcons.DOTS_CIRCLE, 16.sp) }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     DropdownMenuItem(text = { Text("Edit") }, onClick = { expanded = false; onClick(task.uid) }, leadingIcon = { NfIcon(NfIcons.EDIT, 16.sp) })
                     DropdownMenuItem(text = { Text(if (task.statusString == "InProcess") "Pause" else "Start") }, onClick = { expanded = false; onAction("playpause") }, leadingIcon = { NfIcon(if (task.statusString == "InProcess") NfIcons.PAUSE else NfIcons.PLAY, 16.sp) })
@@ -356,10 +361,43 @@ fun TaskRow(task: MobileTask, onToggle: () -> Unit, onAction: (String) -> Unit, 
     }
 }
 
+// Updated Checkbox to match GUI styles
+@Composable
+fun TaskCheckbox(task: MobileTask, calColor: Color, onClick: () -> Unit) {
+    val isDone = task.isDone
+    val status = task.statusString
+
+    // Match GUI Colors
+    val bgColor = when {
+        isDone -> Color(0xFF009900) // Completed (Green)
+        status == "InProcess" -> Color(0xFF99CC99) // In Process (Light Green)
+        status == "Cancelled" -> Color(0xFF4D3333) // Cancelled (Brown/Red)
+        else -> Color.Transparent // Needs Action
+    }
+
+    Box(
+        modifier = Modifier
+            .size(20.dp)
+            .background(bgColor, RoundedCornerShape(4.dp))
+            .border(1.5.dp, calColor, RoundedCornerShape(4.dp))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (isDone) {
+            NfIcon(NfIcons.CHECK, 12.sp, Color.White)
+        } else if (status == "InProcess") {
+            // "Play" icon usually points right, GUI uses a specific char. 
+            // Using PLAY_FA from NerdFonts or standard Play
+            NfIcon(NfIcons.PLAY, 10.sp, Color.White)
+        } else if (status == "Cancelled") {
+            NfIcon(NfIcons.CROSS, 12.sp, Color.White)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDetailScreen(api: CfaitMobile, uid: String, calendars: List<MobileCalendar>, onBack: () -> Unit) {
-    // We need to fetch the specific task details async
     var task by remember { mutableStateOf<MobileTask?>(null) }
     val scope = rememberCoroutineScope()
     var smartInput by remember { mutableStateOf("") }
@@ -367,19 +405,12 @@ fun TaskDetailScreen(api: CfaitMobile, uid: String, calendars: List<MobileCalend
     var showMoveDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uid) {
-        // Fetch all view tasks and find current (a bit inefficient but consistent with API)
         val all = api.getViewTasks(null, "")
         task = all.find { it.uid == uid }
-        task?.let {
-            smartInput = it.smartString
-            description = it.description
-        }
+        task?.let { smartInput = it.smartString; description = it.description }
     }
 
-    if (task == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        return
-    }
+    if (task == null) { Box(Modifier.fillMaxSize()) { CircularProgressIndicator(Modifier.align(Alignment.Center)) }; return }
 
     if (showMoveDialog) {
         AlertDialog(
@@ -389,12 +420,7 @@ fun TaskDetailScreen(api: CfaitMobile, uid: String, calendars: List<MobileCalend
                 LazyColumn {
                     items(calendars) { cal ->
                         if (cal.href != task!!.calendarHref) {
-                            TextButton(
-                                onClick = {
-                                    scope.launch { api.moveTask(uid, cal.href); showMoveDialog = false; onBack() }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text(cal.name) }
+                            TextButton(onClick = { scope.launch { api.moveTask(uid, cal.href); showMoveDialog = false; onBack() } }, modifier = Modifier.fillMaxWidth()) { Text(cal.name) }
                         }
                     }
                 }
@@ -410,36 +436,33 @@ fun TaskDetailScreen(api: CfaitMobile, uid: String, calendars: List<MobileCalend
                 navigationIcon = { IconButton(onClick = onBack) { NfIcon(NfIcons.BACK, 20.sp) } },
                 actions = {
                     TextButton(onClick = { showMoveDialog = true }) { Text("Move") }
-                    TextButton(onClick = { 
-                        scope.launch {
-                            api.updateTaskSmart(uid, smartInput)
-                            api.updateTaskDescription(uid, description)
-                            onBack()
-                        }
-                    }) { Text("Save") }
+                    TextButton(onClick = { scope.launch { api.updateTaskSmart(uid, smartInput); api.updateTaskDescription(uid, description); onBack() } }) { Text("Save") }
                 }
             )
         }
     ) { p ->
         Column(modifier = Modifier.padding(p).padding(16.dp)) {
-            OutlinedTextField(
-                value = smartInput,
-                onValueChange = { smartInput = it },
-                label = { Text("Task (Smart Syntax)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text(
-                "Use !1, @date, #tag, ~duration",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
-                modifier = Modifier.padding(start = 4.dp, bottom = 16.dp)
-            )
+            OutlinedTextField(value = smartInput, onValueChange = { smartInput = it }, label = { Text("Task (Smart Syntax)") }, modifier = Modifier.fillMaxWidth())
+            Text("Use !1, @date, #tag, ~duration", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 16.dp))
             
+            if (task!!.blockedByNames.isNotEmpty()) {
+                Text("Blocked By:", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                task!!.blockedByNames.forEach { name ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                        NfIcon(NfIcons.BLOCK, 12.sp, MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(4.dp))
+                        Text(name, fontSize = 14.sp)
+                    }
+                }
+                Divider(Modifier.padding(vertical = 8.dp))
+            }
+
             OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                label = { Text("Description") },
-                modifier = Modifier.fillMaxWidth().weight(1f)
+                value = description, 
+                onValueChange = { description = it }, 
+                label = { Text("Description") }, 
+                modifier = Modifier.fillMaxWidth().weight(1f), 
+                textStyle = TextStyle(textAlign = androidx.compose.ui.text.style.TextAlign.Start)
             )
         }
     }
@@ -455,11 +478,8 @@ fun SettingsScreen(api: CfaitMobile, onBack: () -> Unit) {
     var hideCompleted by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var aliases by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
-    
-    // Alias inputs
     var newAliasKey by remember { mutableStateOf("") }
     var newAliasTags by remember { mutableStateOf("") }
-
     val scope = rememberCoroutineScope()
 
     fun reload() {
@@ -473,14 +493,7 @@ fun SettingsScreen(api: CfaitMobile, onBack: () -> Unit) {
 
     LaunchedEffect(Unit) { reload() }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = { IconButton(onClick = onBack) { NfIcon(NfIcons.BACK, 20.sp) } }
-            )
-        }
-    ) { p ->
+    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { IconButton(onClick = onBack) { NfIcon(NfIcons.BACK, 20.sp) } }) }) { p ->
         LazyColumn(modifier = Modifier.padding(p).padding(16.dp)) {
             item {
                 Text("Connection", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))
@@ -491,45 +504,25 @@ fun SettingsScreen(api: CfaitMobile, onBack: () -> Unit) {
                 OutlinedTextField(value = pass, onValueChange = { pass = it }, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked = insecure, onCheckedChange = { insecure = it }); Text("Allow Insecure SSL") }
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked = hideCompleted, onCheckedChange = { hideCompleted = it }); Text("Hide Completed Tasks") }
-                
-                Button(onClick = {
-                    scope.launch {
-                        status = "Saving..."
-                        try { 
-                            api.saveConfig(url, user, pass, insecure, hideCompleted)
-                            status = api.connect(url, user, pass, insecure) 
-                        } catch (e: Exception) { status = "Error: ${e.message}" }
-                    }
-                }, modifier = Modifier.fillMaxWidth()) { Text("Save & Connect") }
-                
+                Button(onClick = { scope.launch { status = "Saving..."; try { api.saveConfig(url, user, pass, insecure, hideCompleted); status = api.connect(url, user, pass, insecure) } catch (e: Exception) { status = "Error: ${e.message}" } } }, modifier = Modifier.fillMaxWidth()) { Text("Save & Connect") }
                 Text(status, color = if (status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                
                 Divider(Modifier.padding(vertical = 16.dp))
                 Text("Tag Aliases", fontWeight = FontWeight.Bold)
             }
-
             items(aliases.keys.toList()) { key ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                     Text("#$key", fontWeight = FontWeight.Bold, modifier = Modifier.width(80.dp))
                     Text("→", modifier = Modifier.padding(horizontal = 8.dp))
                     Text(aliases[key]?.joinToString(", ") ?: "", modifier = Modifier.weight(1f))
-                    IconButton(onClick = { 
-                        scope.launch { api.removeAlias(key); reload() } 
-                    }) { NfIcon(NfIcons.CROSS, 16.sp, MaterialTheme.colorScheme.error) }
+                    IconButton(onClick = { scope.launch { api.removeAlias(key); reload() } }) { NfIcon(NfIcons.CROSS, 16.sp, MaterialTheme.colorScheme.error) }
                 }
             }
-
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                     OutlinedTextField(value = newAliasKey, onValueChange = { newAliasKey = it }, label = { Text("Alias") }, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
                     OutlinedTextField(value = newAliasTags, onValueChange = { newAliasTags = it }, label = { Text("Tags (comma)") }, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        if (newAliasKey.isNotBlank() && newAliasTags.isNotBlank()) {
-                            val tags = newAliasTags.split(",").map { it.trim().trimStart('#') }.filter { it.isNotEmpty() }
-                            scope.launch { api.addAlias(newAliasKey.trimStart('#'), tags); newAliasKey=""; newAliasTags=""; reload() }
-                        }
-                    }) { NfIcon(NfIcons.ADD) }
+                    IconButton(onClick = { if (newAliasKey.isNotBlank() && newAliasTags.isNotBlank()) { val tags = newAliasTags.split(",").map { it.trim().trimStart('#') }.filter { it.isNotEmpty() }; scope.launch { api.addAlias(newAliasKey.trimStart('#'), tags); newAliasKey=""; newAliasTags=""; reload() } } }) { NfIcon(NfIcons.ADD) }
                 }
             }
         }
@@ -537,13 +530,34 @@ fun SettingsScreen(api: CfaitMobile, onBack: () -> Unit) {
 }
 
 // --- UTILS ---
+
+fun parseHexColor(hex: String): Color {
+    return try {
+        val clean = hex.removePrefix("#")
+        val colorInt = if (clean.length == 6) android.graphics.Color.parseColor("#$clean") else if (clean.length == 8) android.graphics.Color.parseColor("#$clean") else android.graphics.Color.GRAY
+        Color(colorInt)
+    } catch (e: Exception) { Color.Gray }
+}
+
+fun getTaskTextColor(prio: Int, isDone: Boolean, isDark: Boolean): Color {
+    if (isDone) return Color.Gray
+    return when(prio) {
+        1 -> Color(0xFFFF4444) // Red
+        2 -> Color(0xFFFF6633)
+        3 -> Color(0xFFFF8800)
+        4 -> Color(0xFFFFBB33)
+        5 -> Color(0xFFFFD700) // Yellow
+        6 -> Color(0xFFD9D98C)
+        7 -> Color(0xFFB3BFC6)
+        8 -> Color(0xFFA699CC)
+        9 -> Color(0xFF998CA6)
+        else -> if (isDark) Color.White else Color.Black
+    }
+}
+
 @Composable
 fun NfIcon(text: String, size: androidx.compose.ui.unit.TextUnit = 24.sp, color: Color = MaterialTheme.colorScheme.onSurface) {
     Text(text = text, fontFamily = NerdFont, fontSize = size, color = color)
-}
-
-fun getPriorityColor(prio: Int): Color {
-    return when (prio) { 1 -> Color(0xFFFF4444); 2 -> Color(0xFFFF8800); 3 -> Color(0xFFFFBB33); 4 -> Color(0xFFFFD700); 5 -> Color(0xFFFFFF00); else -> Color.LightGray }
 }
 
 fun getTagColor(tag: String): Color {

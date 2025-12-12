@@ -883,7 +883,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_change_priority() != 52402.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cfait_checksum_method_cfaitmobile_connect() != 6185.toShort()) {
+    if (lib.uniffi_cfait_checksum_method_cfaitmobile_connect() != 18164.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_delete_task() != 55596.toShort()) {
@@ -901,7 +901,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_get_view_tasks() != 40875.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cfait_checksum_method_cfaitmobile_load_from_cache() != 29555.toShort()) {
+    if (lib.uniffi_cfait_checksum_method_cfaitmobile_load_from_cache() != 57452.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_move_task() != 45551.toShort()) {
@@ -925,7 +925,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_set_status_process() != 37852.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cfait_checksum_method_cfaitmobile_sync() != 19522.toShort()) {
+    if (lib.uniffi_cfait_checksum_method_cfaitmobile_sync() != 46829.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_toggle_task() != 2169.toShort()) {
@@ -1394,9 +1394,6 @@ public interface CfaitMobileInterface {
     
     suspend fun `changePriority`(`uid`: kotlin.String, `delta`: kotlin.Byte)
     
-    /**
-     * Used for testing settings login
-     */
     suspend fun `connect`(`url`: kotlin.String, `user`: kotlin.String, `pass`: kotlin.String, `insecure`: kotlin.Boolean): kotlin.String
     
     suspend fun `deleteTask`(`uid`: kotlin.String)
@@ -1409,10 +1406,6 @@ public interface CfaitMobileInterface {
     
     suspend fun `getViewTasks`(`filterTag`: kotlin.String?, `searchQuery`: kotlin.String): List<MobileTask>
     
-    /**
-     * Reads tasks from disk (Local + Cache) into memory immediately.
-     * This is synchronous and fast.
-     */
     fun `loadFromCache`()
     
     suspend fun `moveTask`(`uid`: kotlin.String, `newCalHref`: kotlin.String)
@@ -1429,10 +1422,6 @@ public interface CfaitMobileInterface {
     
     suspend fun `setStatusProcess`(`uid`: kotlin.String)
     
-    /**
-     * Performs the network synchronization.
-     * Should be called after load_from_cache.
-     */
     suspend fun `sync`(): kotlin.String
     
     suspend fun `toggleTask`(`uid`: kotlin.String)
@@ -1608,9 +1597,6 @@ open class CfaitMobile: Disposable, AutoCloseable, CfaitMobileInterface
     }
 
     
-    /**
-     * Used for testing settings login
-     */
     @Throws(MobileException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `connect`(`url`: kotlin.String, `user`: kotlin.String, `pass`: kotlin.String, `insecure`: kotlin.Boolean) : kotlin.String {
@@ -1719,11 +1705,7 @@ open class CfaitMobile: Disposable, AutoCloseable, CfaitMobileInterface
     )
     }
 
-    
-    /**
-     * Reads tasks from disk (Local + Cache) into memory immediately.
-     * This is synchronous and fast.
-     */override fun `loadFromCache`()
+    override fun `loadFromCache`()
         = 
     callWithHandle {
     uniffiRustCall() { _status ->
@@ -1854,10 +1836,6 @@ open class CfaitMobile: Disposable, AutoCloseable, CfaitMobileInterface
     }
 
     
-    /**
-     * Performs the network synchronization.
-     * Should be called after load_from_cache.
-     */
     @Throws(MobileException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `sync`() : kotlin.String {
@@ -2186,6 +2164,8 @@ data class MobileTask (
     var `isBlocked`: kotlin.Boolean
     , 
     var `statusString`: kotlin.String
+    , 
+    var `blockedByNames`: List<kotlin.String>
     
 ){
     
@@ -2216,6 +2196,7 @@ public object FfiConverterTypeMobileTask: FfiConverterRustBuffer<MobileTask> {
             FfiConverterUInt.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
@@ -2235,7 +2216,8 @@ public object FfiConverterTypeMobileTask: FfiConverterRustBuffer<MobileTask> {
             FfiConverterString.allocationSize(value.`smartString`) +
             FfiConverterUInt.allocationSize(value.`depth`) +
             FfiConverterBoolean.allocationSize(value.`isBlocked`) +
-            FfiConverterString.allocationSize(value.`statusString`)
+            FfiConverterString.allocationSize(value.`statusString`) +
+            FfiConverterSequenceString.allocationSize(value.`blockedByNames`)
     )
 
     override fun write(value: MobileTask, buf: ByteBuffer) {
@@ -2255,6 +2237,7 @@ public object FfiConverterTypeMobileTask: FfiConverterRustBuffer<MobileTask> {
             FfiConverterUInt.write(value.`depth`, buf)
             FfiConverterBoolean.write(value.`isBlocked`, buf)
             FfiConverterString.write(value.`statusString`, buf)
+            FfiConverterSequenceString.write(value.`blockedByNames`, buf)
     }
 }
 
