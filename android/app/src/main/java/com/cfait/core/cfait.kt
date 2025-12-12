@@ -659,6 +659,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cfait_checksum_method_cfaitmobile_get_view_tasks(
     ): Short
+    external fun uniffi_cfait_checksum_method_cfaitmobile_isolate_calendar(
+    ): Short
     external fun uniffi_cfait_checksum_method_cfaitmobile_load_from_cache(
     ): Short
     external fun uniffi_cfait_checksum_method_cfaitmobile_move_task(
@@ -729,6 +731,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_cfait_fn_method_cfaitmobile_get_view_tasks(`ptr`: Long,`filterTag`: RustBuffer.ByValue,`searchQuery`: RustBuffer.ByValue,
     ): Long
+    external fun uniffi_cfait_fn_method_cfaitmobile_isolate_calendar(`ptr`: Long,`href`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_cfait_fn_method_cfaitmobile_load_from_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_cfait_fn_method_cfaitmobile_move_task(`ptr`: Long,`uid`: RustBuffer.ByValue,`newCalHref`: RustBuffer.ByValue,
@@ -899,6 +903,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_get_view_tasks() != 40875.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cfait_checksum_method_cfaitmobile_isolate_calendar() != 34103.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cfait_checksum_method_cfaitmobile_load_from_cache() != 57452.toShort()) {
@@ -1406,6 +1413,8 @@ public interface CfaitMobileInterface {
     
     suspend fun `getViewTasks`(`filterTag`: kotlin.String?, `searchQuery`: kotlin.String): List<MobileTask>
     
+    fun `isolateCalendar`(`href`: kotlin.String)
+    
     fun `loadFromCache`()
     
     suspend fun `moveTask`(`uid`: kotlin.String, `newCalHref`: kotlin.String)
@@ -1704,6 +1713,19 @@ open class CfaitMobile: Disposable, AutoCloseable, CfaitMobileInterface
         UniffiNullRustCallStatusErrorHandler,
     )
     }
+
+    
+    @Throws(MobileException::class)override fun `isolateCalendar`(`href`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(MobileException) { _status ->
+    UniffiLib.uniffi_cfait_fn_method_cfaitmobile_isolate_calendar(
+        it,
+        FfiConverterString.lower(`href`),_status)
+}
+    }
+    
+    
 
     override fun `loadFromCache`()
         = 

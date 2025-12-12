@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +77,7 @@ object NfIcons {
     val PRIORITY_DOWN = get(0xf0604)
     val COPY = get(0xf0c5) 
     val EDIT = get(0xf040)
+    val ARROW_RIGHT = get(0xf061)
 }
 
 class MainActivity : ComponentActivity() {
@@ -241,14 +243,36 @@ fun HomeScreen(
                                 val iconColor = if (isDefault) MaterialTheme.colorScheme.primary else if (cal.isVisible) calColor else Color.Gray
 
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().clickable { api.setDefaultCalendar(cal.href); onDataChanged() }.padding(16.dp, 12.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    IconButton(onClick = { api.setCalendarVisibility(cal.href, !cal.isVisible); onDataChanged(); updateTaskList() }, modifier = Modifier.size(24.dp)) {
+                                    IconButton(onClick = { api.setCalendarVisibility(cal.href, !cal.isVisible); onDataChanged(); updateTaskList() }) {
                                         NfIcon(iconChar, color = iconColor)
                                     }
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(cal.name, fontWeight = if (isDefault) FontWeight.Bold else FontWeight.Normal, color = if (isDefault) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                    TextButton(
+                                        onClick = {
+                                            api.setDefaultCalendar(cal.href)
+                                            onDataChanged()
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        colors = ButtonDefaults.textButtonColors(contentColor = if (isDefault) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                    ) {
+                                        Text(
+                                            cal.name,
+                                            fontWeight = if (isDefault) FontWeight.Bold else FontWeight.Normal,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textAlign = TextAlign.Start
+                                        )
+                                    }
+                                    IconButton(onClick = {
+                                        scope.launch {
+                                            api.isolateCalendar(cal.href)
+                                            onDataChanged()
+                                            drawerState.close()
+                                        }
+                                    }) {
+                                        NfIcon(NfIcons.ARROW_RIGHT, size = 18.sp)
+                                    }
                                 }
                             }
                         } else {

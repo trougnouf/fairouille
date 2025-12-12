@@ -212,6 +212,21 @@ impl CfaitMobile {
         }
         config.save().map_err(MobileError::from)
     }
+    pub fn isolate_calendar(&self, href: String) -> Result<(), MobileError> {
+        let mut config = Config::load().map_err(MobileError::from)?;
+        let all_cals = self.get_calendars();
+
+        let mut new_hidden = vec![];
+        for cal in all_cals {
+            if cal.href != href {
+                new_hidden.push(cal.href.clone());
+            }
+        }
+        config.hidden_calendars = new_hidden;
+        config.default_calendar = Some(href);
+
+        config.save().map_err(MobileError::from)
+    }
     pub fn load_from_cache(&self) {
         let mut store = self.store.blocking_lock();
         store.clear();
