@@ -194,7 +194,8 @@ fun HomeScreen(
         scope.launch { try { tasks = api.getViewTasks(filterTag, searchQuery) } catch (_: Exception) { } }
     }
 
-    LaunchedEffect(searchQuery, filterTag, isLoading) { updateTaskList() }
+    // FIX 1: Add calendars and tags to LaunchedEffect key
+    LaunchedEffect(searchQuery, filterTag, isLoading, calendars, tags) { updateTaskList() }
 
     fun toggleTask(uid: String) = scope.launch { try { api.toggleTask(uid); updateTaskList(); onDataChanged() } catch (_: Exception){} }
     fun addTask(txt: String) = scope.launch { try { api.addTaskSmart(txt); updateTaskList(); onDataChanged() } catch (_: Exception){} }
@@ -590,6 +591,8 @@ fun SettingsScreen(api: CfaitMobile, onBack: () -> Unit) {
             try { 
                 api.saveConfig(url, user, pass, insecure, hideCompleted, disabledSet.toList())
                 status = api.connect(url, user, pass, insecure) 
+                // FIX 2: Reload config and calendars immediately to reflect discovery
+                reload()
             } catch (e: Exception) { status = "Error: ${e.message}" } 
         }
     }

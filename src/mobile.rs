@@ -15,7 +15,6 @@ use android_logger::Config as LogConfig;
 #[cfg(target_os = "android")]
 use log::LevelFilter;
 
-// ... [Error Handling - NO CHANGES] ...
 #[derive(Debug, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum MobileError {
@@ -79,7 +78,7 @@ pub struct MobileCalendar {
     pub color: Option<String>,
     pub is_visible: bool,
     pub is_local: bool,
-    pub is_disabled: bool, // NEW: Support disabled state
+    pub is_disabled: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -97,10 +96,9 @@ pub struct MobileConfig {
     pub allow_insecure: bool,
     pub hide_completed: bool,
     pub tag_aliases: HashMap<String, Vec<String>>,
-    pub disabled_calendars: Vec<String>, // NEW: Support disabled state
+    pub disabled_calendars: Vec<String>,
 }
 
-// ... [task_to_mobile helper - NO CHANGES] ...
 fn task_to_mobile(t: &Task, store: &TaskStore) -> MobileTask {
     let smart = t.to_smart_string();
     let status_str = format!("{:?}", t.status);
@@ -176,7 +174,7 @@ impl CfaitMobile {
         pass: String,
         insecure: bool,
         hide_completed: bool,
-        disabled_calendars: Vec<String>, // NEW PARAMETER
+        disabled_calendars: Vec<String>,
     ) -> Result<(), MobileError> {
         let mut c = Config::load().unwrap_or_default();
         c.url = url;
@@ -190,7 +188,6 @@ impl CfaitMobile {
         c.save().map_err(MobileError::from)
     }
 
-    // ... [add/remove alias, default_cal, visibility, load_from_cache, sync, connect... NO CHANGES] ...
     pub fn add_alias(&self, key: String, tags: Vec<String>) -> Result<(), MobileError> {
         let mut c = Config::load().unwrap_or_default();
         c.tag_aliases.insert(key, tags);
@@ -265,7 +262,7 @@ impl CfaitMobile {
             color: None,
             is_visible: !config.hidden_calendars.contains(&local_href),
             is_local: true,
-            is_disabled: false, // Local is never disabled in this logic
+            is_disabled: false,
         });
 
         if let Ok(cals) = crate::cache::Cache::load_calendars() {
@@ -290,7 +287,6 @@ impl CfaitMobile {
         let store = self.store.lock().await;
         let config = Config::load().unwrap_or_default();
         let empty_includes = HashSet::new();
-        // Hide tags from disabled calendars implicitly via hidden_calendars union
         let mut hidden_cals: HashSet<String> = config.hidden_calendars.into_iter().collect();
         hidden_cals.extend(config.disabled_calendars);
 
@@ -323,7 +319,7 @@ impl CfaitMobile {
         }
 
         let mut hidden: HashSet<String> = config.hidden_calendars.into_iter().collect();
-        hidden.extend(config.disabled_calendars); // IMPORTANT: Exclude disabled calendars from view
+        hidden.extend(config.disabled_calendars);
 
         let cutoff_date = if let Some(months) = config.sort_cutoff_months {
             Some(chrono::Utc::now() + chrono::Duration::days(months as i64 * 30))
@@ -349,7 +345,6 @@ impl CfaitMobile {
             .collect()
     }
 
-    // [Actions]
     pub async fn yank_task(&self, _uid: String) -> Result<(), MobileError> {
         Ok(())
     }
@@ -488,30 +483,49 @@ impl CfaitMobile {
 
 impl CfaitMobile {
     async fn apply_connection(&self, config: Config) -> Result<String, MobileError> {
-        let (client, cals, tasks, active_href, warning) =
+        // 1. Initial Connect & Calendar Discovery
+        let (client, cals, _initial_tasks, _active, warning) =
             RustyClient::connect_with_fallback(config)
                 .await
                 .map_err(MobileError::from)?;
-        *self.client.lock().await = Some(client);
+
+        *self.client.lock().await = Some(client.clone());
         let mut store = self.store.lock().await;
         store.clear();
+
+        // 2. Load Local Calendar
         if let Ok(local) = LocalStorage::load() {
             store.insert(LOCAL_CALENDAR_HREF.to_string(), local);
         }
-        if let Some(href) = active_href
-            && href != LOCAL_CALENDAR_HREF
-        {
-            store.insert(href, tasks);
-        }
-        for cal in cals {
-            if !store.calendars.contains_key(&cal.href) && cal.href != LOCAL_CALENDAR_HREF {
-                if let Ok((cached, _)) = crate::cache::Cache::load(&cal.href) {
-                    store.insert(cal.href, cached);
+
+        // 3. Full Sync (Fetch ALL calendars)
+        // This ensures dependencies across calendars and background updates are caught.
+        // RustyClient::get_all_tasks handles concurrency and delta sync (CTag/ETag), so this is efficient.
+        match client.get_all_tasks(&cals).await {
+            Ok(results) => {
+                for (href, tasks) in results {
+                    store.insert(href, tasks);
+                }
+            }
+            Err(e) => {
+                // If fetch fails (e.g. partial offline), try to load what we can from cache
+                // and preserve the warning.
+                for cal in &cals {
+                    if cal.href != LOCAL_CALENDAR_HREF && !store.calendars.contains_key(&cal.href) {
+                        if let Ok((cached, _)) = crate::cache::Cache::load(&cal.href) {
+                            store.insert(cal.href.clone(), cached);
+                        }
+                    }
+                }
+                if warning.is_none() {
+                    return Err(MobileError::from(e));
                 }
             }
         }
+
         Ok(warning.unwrap_or_else(|| "Connected".to_string()))
     }
+
     async fn modify_task_and_sync<F>(&self, uid: String, mut modifier: F) -> Result<(), MobileError>
     where
         F: FnMut(&mut Task),
