@@ -423,8 +423,8 @@ fn parse_related_to_manually(raw_ics: &str) -> (Option<String>, Vec<String>) {
     let mut current_line = String::new();
 
     let process_line = |line: &str, p: &mut Option<String>, d: &mut Vec<String>| {
-        if line.to_uppercase().starts_with("RELATED-TO") {
-            if let Some((params_part, value)) = line.split_once(':') {
+        if line.to_uppercase().starts_with("RELATED-TO")
+            && let Some((params_part, value)) = line.split_once(':') {
                 let params_upper = params_part.to_uppercase();
                 // Naive check usually sufficient for RELTYPE=DEPENDS-ON
                 let is_dependency = params_upper.contains("RELTYPE=DEPENDS-ON");
@@ -437,7 +437,6 @@ fn parse_related_to_manually(raw_ics: &str) -> (Option<String>, Vec<String>) {
                     *p = Some(val);
                 }
             }
-        }
     };
 
     for raw_line in raw_ics.lines() {
@@ -456,4 +455,102 @@ fn parse_related_to_manually(raw_ics: &str) -> (Option<String>, Vec<String>) {
     }
 
     (parent, deps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_relationships_parsing_duplicate_protection() {
+        // This validates the bug fix where having a dependency caused the parent relationship
+        // to be lost (or vice versa) because the library overwrote the duplicate key.
+        // We now handle it manually.
+        let ics = "BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:child-task-uid
+SUMMARY:Child Task
+RELATED-TO:parent-task-uid
+RELATED-TO;RELTYPE=DEPENDS-ON:blocker-task-uid
+END:VTODO
+END:VCALENDAR";
+
+        let task = Task::from_ics(
+            ics,
+            "etag".to_string(),
+            "/href".to_string(),
+            "/cal/".to_string(),
+        )
+        .expect("Failed to parse ICS");
+
+        assert_eq!(
+            task.parent_uid,
+            Some("parent-task-uid".to_string()),
+            "Parent UID should be preserved"
+        );
+        assert_eq!(
+            task.dependencies,
+            vec!["blocker-task-uid".to_string()],
+            "Dependency should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_ghost_properties_exclusion_case_insensitive() {
+        // Validates that properties with different casing (e.g. Related-To vs RELATED-TO)
+        // are correctly identified as handled and NOT added to unmapped_properties.
+        // If they were added to unmapped, they would be duplicated upon saving.
+        let ics = "BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:ghost-test
+SUMMARY:Ghost Test
+Related-To:parent-uid
+Status:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR";
+
+        let task = Task::from_ics(
+            ics,
+            "etag".to_string(),
+            "/href".to_string(),
+            "/cal/".to_string(),
+        )
+        .expect("Failed to parse ICS");
+
+        assert_eq!(task.parent_uid, Some("parent-uid".to_string()));
+        assert!(
+            task.unmapped_properties.is_empty(),
+            "Should not have unmapped properties for handled keys (even mixed case)"
+        );
+    }
+
+    #[test]
+    fn test_manual_parsing_line_folding() {
+        // Validates that the manual parser handles line folding (continuation lines)
+        let ics = "BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:folded
+SUMMARY:Folded
+RELATED-TO;RELTYPE=DEP
+ ENDS-ON:long-dependency-uid
+END:VTODO
+END:VCALENDAR";
+
+        let task = Task::from_ics(
+            ics,
+            "etag".to_string(),
+            "/href".to_string(),
+            "/cal/".to_string(),
+        )
+        .expect("Failed to parse ICS");
+
+        assert_eq!(
+            task.dependencies,
+            vec!["long-dependency-uid".to_string()],
+            "Folded lines should be unwrapped correctly"
+        );
+    }
 }

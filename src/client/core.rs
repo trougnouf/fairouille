@@ -523,14 +523,13 @@ impl RustyClient {
 
     // NEW HELPER: Fetch ETag explicitly if missing in PUT response
     async fn fetch_etag(&self, path: &str) -> Option<String> {
-        if let Some(client) = &self.client {
-            if let Ok(resp) = client
+        if let Some(client) = &self.client
+            && let Ok(resp) = client
                 .request(GetProperty::new(path, &names::GETETAG))
                 .await
             {
                 return resp.value;
             }
-        }
         None
     }
 
@@ -685,13 +684,11 @@ impl RustyClient {
             match result {
                 Ok(_) => {
                     // --- FIX: Fetch ETag if needed ---
-                    if new_etag_to_propagate.is_none() {
-                        if let Some(path) = path_for_refresh {
-                            if let Some(fetched) = self.fetch_etag(&path).await {
+                    if new_etag_to_propagate.is_none()
+                        && let Some(path) = path_for_refresh
+                            && let Some(fetched) = self.fetch_etag(&path).await {
                                 new_etag_to_propagate = Some(fetched);
                             }
-                        }
-                    }
 
                     let commit_res = Journal::modify(|queue| {
                         if !queue.is_empty() {
